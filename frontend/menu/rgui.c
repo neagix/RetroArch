@@ -981,6 +981,9 @@ static int rgui_settings_toggle_setting(rgui_handle_t *rgui, unsigned setting, r
             return -1;
          }
          break;
+      case RGUI_SETTINGS_HALT_SYSTEM:
+        system("sudo halt");
+        //fallback wanted
       case RGUI_SETTINGS_QUIT_RARCH:
          if (action == RGUI_ACTION_OK)
          {
@@ -1241,6 +1244,7 @@ static void rgui_settings_populate_entries(rgui_handle_t *rgui)
 #ifndef HAVE_DYNAMIC
    rgui_list_push(rgui->selection_buf, "Restart RetroArch", RGUI_SETTINGS_RESTART_EMULATOR, 0);
 #endif
+   rgui_list_push(rgui->selection_buf, "Halt System", RGUI_SETTINGS_HALT_SYSTEM, 0);
    rgui_list_push(rgui->selection_buf, "Quit RetroArch", RGUI_SETTINGS_QUIT_RARCH, 0);
 }
 
