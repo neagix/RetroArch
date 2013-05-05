@@ -119,7 +119,10 @@ bool input_joypad_pressed(const rarch_joypad_driver_t *driver,
    if (joykey == NO_BTN)
       joykey = auto_binds[key].joykey;
 
-   if (driver->button(joy_index, (uint16_t)joykey))
+   bool is_button_pressed = driver->button(joy_index, (uint16_t)joykey);
+   if (is_button_pressed && g_settings.input.debug_enable)
+       RARCH_LOG("input #%d, button %d pressed\n", joy_index, (int)joykey);
+   if (is_button_pressed)
       return true;
 
    uint32_t joyaxis = binds[key].joyaxis;
@@ -128,7 +131,11 @@ bool input_joypad_pressed(const rarch_joypad_driver_t *driver,
 
    int16_t axis = driver->axis(joy_index, joyaxis);
    float scaled_axis = (float)abs(axis) / 0x8000;
-   return scaled_axis > g_settings.input.axis_threshold;
+
+   bool is_axis_toggled = scaled_axis > g_settings.input.axis_threshold;
+   if (is_axis_toggled && g_settings.input.debug_enable)
+       RARCH_LOG("input #%d, axis %d toggled press (%.2f > %.2f)\n", joy_index, joyaxis, scaled_axis, g_settings.input.axis_threshold);
+   return is_axis_toggled;
 }
 
 int16_t input_joypad_analog(const rarch_joypad_driver_t *driver,
