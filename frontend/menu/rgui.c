@@ -977,7 +977,7 @@ static int rgui_settings_toggle_setting(rgui_handle_t *rgui, unsigned setting, r
          }
          break;
       case RGUI_SETTINGS_HALT_SYSTEM:
-        system("sudo halt");
+        system("sudo shutdown -h now");
         //fallback wanted
       case RGUI_SETTINGS_QUIT_RARCH:
          if (action == RGUI_ACTION_OK)
