@@ -60,17 +60,6 @@
    }\
 }
 
-#define MAKE_DIR(x) {\
-   if (!path_is_directory((x)))\
-   {\
-      RARCH_WARN("Directory \"%s\" does not exists, creating\n", (x));\
-      if (mkdir((x), 0777) != 0)\
-      {\
-         RARCH_ERR("Could not create directory \"%s\"\n", (x));\
-      }\
-   }\
-}
-
 #ifdef IS_SALAMANDER
 
 static void find_and_set_first_file(void)
@@ -93,16 +82,7 @@ static void salamander_init_settings(void)
    char tmp_str[512] = {0};
    bool config_file_exists;
 
-   if(!path_file_exists(default_paths.config_path))
-   {
-      FILE * f;
-      config_file_exists = false;
-      RARCH_ERR("Config file \"%s\" doesn't exist. Creating...\n", default_paths.config_path);
-      MAKE_DIR(default_paths.port_dir);
-      f = fopen(default_paths.config_path, "w");
-      fclose(f);
-   }
-   else
+   if (path_file_exists(default_paths.config_path))
       config_file_exists = true;
 
    //try to find CORE executable
@@ -120,9 +100,14 @@ static void salamander_init_settings(void)
       if(config_file_exists)
       {
          config_file_t * conf = config_file_new(default_paths.config_path);
-         config_get_array(conf, "libretro_path", tmp_str, sizeof(tmp_str));
-         config_file_free(conf);
-         snprintf(default_paths.libretro_path, sizeof(default_paths.libretro_path), tmp_str);
+         if (!conf) // stupid libfat bug or something; somtimes it says the file is there when it doesn't
+            config_file_exists = false;
+         else
+         {
+            config_get_array(conf, "libretro_path", tmp_str, sizeof(tmp_str));
+            config_file_free(conf);
+            snprintf(default_paths.libretro_path, sizeof(default_paths.libretro_path), tmp_str);
+         }
       }
 
       if(!config_file_exists || !strcmp(default_paths.libretro_path, ""))
@@ -263,21 +248,11 @@ static void get_environment_settings(int argc, char *argv[])
    snprintf(g_extern.config_path, sizeof(g_extern.config_path), "%s/retroarch.cfg", default_paths.port_dir);
 #endif
    snprintf(default_paths.system_dir, sizeof(default_paths.system_dir), "%s/system", default_paths.port_dir);
+   snprintf(default_paths.sram_dir, sizeof(default_paths.savestate_dir), "%s/savefiles", default_paths.port_dir);
    snprintf(default_paths.savestate_dir, sizeof(default_paths.savestate_dir), "%s/savestates", default_paths.port_dir);
    strlcpy(default_paths.filesystem_root_dir, "/", sizeof(default_paths.filesystem_root_dir));
    snprintf(default_paths.filebrowser_startup_dir, sizeof(default_paths.filebrowser_startup_dir), default_paths.filesystem_root_dir);
-   snprintf(default_paths.sram_dir, sizeof(default_paths.sram_dir), "%s/sram", default_paths.port_dir);
    snprintf(default_paths.input_presets_dir, sizeof(default_paths.input_presets_dir), "%s/input", default_paths.port_dir);
-
-#ifndef IS_SALAMANDER
-   MAKE_DIR(default_paths.port_dir);
-   MAKE_DIR(default_paths.system_dir);
-   MAKE_DIR(default_paths.savestate_dir);
-   MAKE_DIR(default_paths.sram_dir);
-   MAKE_DIR(default_paths.input_presets_dir);
-
-   MAKE_FILE(g_extern.config_path);
-#endif
 }
 
 extern void __exception_setreload(int t);

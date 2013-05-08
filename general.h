@@ -100,15 +100,11 @@ enum menu_enums
 {
    MODE_GAME = 0,
    MODE_LOAD_GAME,
-   MODE_LOAD_GAME_SRAM_DIR_ENABLE,
-   MODE_LOAD_GAME_STATE_DIR_ENABLE,
-   MODE_LOAD_FIRST_SHADER,
    MODE_INIT,
    MODE_MENU,
    MODE_MENU_WIDESCREEN,
    MODE_MENU_HD,
    MODE_MENU_PREINIT,
-   MODE_MENU_INGAME,
    MODE_MENU_INGAME_EXIT,
    MODE_INFO_DRAW,
    MODE_FPS_DRAW,
@@ -329,6 +325,7 @@ struct global
 #endif
    char config_path[PATH_MAX];
    char append_config_path[PATH_MAX];
+   char input_config_path[PATH_MAX];
 
 #ifdef HAVE_FILE_LOGGER
    char default_log_file[PATH_MAX];
@@ -382,7 +379,6 @@ struct global
       struct retro_hw_render_callback hw_render_callback;
 
       core_option_manager_t *core_options;
-
    } system;
 
    struct
@@ -575,22 +571,11 @@ struct global
          unsigned volume_level;
 #endif
       } sound;
-
-#ifdef HAVE_OSKUTIL
-      struct
-      {
-         oskutil_params oskutil_handle;
-      } misc;
-#endif
    } console;
 
    uint64_t lifecycle_state;
    uint64_t lifecycle_mode_state;
 
-   struct
-   {
-      char input_cfg_path[PATH_MAX];
-   } file_state;
 
    // If this is non-NULL. RARCH_LOG and friends will write to this file.
    FILE *log_file;
@@ -626,7 +611,6 @@ enum
    S_AUDIO_CONTROL_RATE_INCREMENT,
    S_FRAME_ADVANCE,
    S_HW_TEXTURE_FILTER,
-   S_HW_TEXTURE_FILTER_2,
    S_RESOLUTION_PREVIOUS,
    S_RESOLUTION_NEXT,
    S_ROTATION_DECREMENT,
@@ -634,9 +618,6 @@ enum
    S_REWIND,
    S_SAVESTATE_DECREMENT,
    S_SAVESTATE_INCREMENT,
-   S_SCALE_ENABLED,
-   S_SCALE_FACTOR_DECREMENT,
-   S_SCALE_FACTOR_INCREMENT,
    S_THROTTLE,
    S_TRIPLE_BUFFERING,
    S_REFRESH_RATE_DECREMENT,
@@ -648,13 +629,10 @@ enum
    S_DEF_AUDIO_MUTE,
    S_DEF_AUDIO_CONTROL_RATE,
    S_DEF_HW_TEXTURE_FILTER,
-   S_DEF_HW_TEXTURE_FILTER_2,
    S_DEF_ROTATION,
    S_DEF_THROTTLE,
    S_DEF_TRIPLE_BUFFERING,
    S_DEF_SAVE_STATE,
-   S_DEF_SCALE_ENABLED,
-   S_DEF_SCALE_FACTOR,
    S_DEF_REFRESH_RATE,
    S_DEF_INFO_DEBUG_MSG,
    S_DEF_INFO_MSG,

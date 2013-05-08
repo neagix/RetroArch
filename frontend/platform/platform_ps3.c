@@ -86,7 +86,7 @@ static void salamander_init_settings(void)
       char tmp_str[PATH_MAX];
       bool config_file_exists = false;
 
-      if(path_file_exists(default_paths.config_path))
+      if (path_file_exists(default_paths.config_path))
          config_file_exists = true;
 
       //try to find CORE executable
@@ -101,7 +101,7 @@ static void salamander_init_settings(void)
       }
       else
       {
-         if(config_file_exists)
+         if (config_file_exists)
          {
             config_file_t * conf = config_file_new(default_paths.config_path);
             config_get_array(conf, "libretro_path", tmp_str, sizeof(tmp_str));
@@ -109,7 +109,7 @@ static void salamander_init_settings(void)
             snprintf(default_paths.libretro_path, sizeof(default_paths.libretro_path), tmp_str);
          }
 
-         if(!config_file_exists || !strcmp(default_paths.libretro_path, ""))
+         if (!config_file_exists || !strcmp(default_paths.libretro_path, ""))
          {
             find_and_set_first_file();
          }
@@ -143,7 +143,7 @@ static void callback_sysutil_exit(uint64_t status, uint64_t param, void *userdat
 
 #ifndef IS_SALAMANDER
 #ifdef HAVE_OSKUTIL
-   oskutil_params *osk = &g_extern.console.misc.oskutil_handle;
+   oskutil_params *osk = &rgui->oskutil_handle;
 #endif
    gl_t *gl = driver.video_data;
 
@@ -151,7 +151,7 @@ static void callback_sysutil_exit(uint64_t status, uint64_t param, void *userdat
    {
       case CELL_SYSUTIL_REQUEST_EXITGAME:
          gl->quitting = true;
-         g_extern.lifecycle_mode_state &= ~((1ULL << MODE_MENU) | (1ULL << MODE_MENU_INGAME) | (1ULL << MODE_GAME));
+         g_extern.lifecycle_mode_state &= ~((1ULL << MODE_MENU) | (1ULL << MODE_GAME));
          g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
          break;
 #ifdef HAVE_OSKUTIL
@@ -181,7 +181,7 @@ static void callback_sysutil_exit(uint64_t status, uint64_t param, void *userdat
          break;
       case CELL_SYSUTIL_OSKDIALOG_UNLOADED:
          RARCH_LOG("CELL_SYSUTIL_OSKDIALOG_UNLOADED.\n");
-         sys_memory_container_destroy(g_extern.console.misc.oskutil_handle.containerid);
+         sys_memory_container_destroy(osk->containerid);
          break;
 #endif
    }
@@ -263,7 +263,7 @@ static void get_environment_settings(int argc, char *argv[])
       snprintf(default_paths.savestate_dir, sizeof(default_paths.savestate_dir), "%s/savestates", default_paths.core_dir);
       snprintf(default_paths.filesystem_root_dir, sizeof(default_paths.filesystem_root_dir), "/");
       snprintf(default_paths.filebrowser_startup_dir, sizeof(default_paths.filebrowser_startup_dir), default_paths.filesystem_root_dir);
-      snprintf(default_paths.sram_dir, sizeof(default_paths.sram_dir), "%s/sram", default_paths.core_dir);
+      snprintf(default_paths.sram_dir, sizeof(default_paths.sram_dir), "%s/savefiles", default_paths.core_dir);
 
       snprintf(default_paths.system_dir, sizeof(default_paths.system_dir), "%s/system", default_paths.core_dir);
 

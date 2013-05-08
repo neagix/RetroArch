@@ -2969,9 +2969,6 @@ static inline bool check_enter_rgui(void)
    bool rmenu_toggle = input_key_pressed_func(RARCH_MENU_TOGGLE) || (g_extern.libretro_dummy && !old_rmenu_toggle);
    if (rmenu_toggle && !old_rmenu_toggle)
    {
-      if (g_extern.menu_toggle_behavior == 0)
-         g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_INGAME);
-
       g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU);
       old_rmenu_toggle = true;
       return true;
@@ -3052,7 +3049,6 @@ bool rarch_main_iterate(void)
    {
       g_extern.lifecycle_state &= ~(1ULL << RARCH_FRAMEADVANCE);
       g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU);
-      g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_INGAME);
       return false;
    }
 #endif
@@ -3107,13 +3103,6 @@ void rarch_main_deinit(void)
          RARCH_ERR("Failed to remove temporary file: %s.\n", g_extern.last_rom);
       g_extern.rom_file_temporary = false;
    }
-
-   if (g_extern.system.core_options)
-   {
-      core_option_flush(g_extern.system.core_options);
-      core_option_free(g_extern.system.core_options);
-   }
-   g_extern.system.core_options = NULL;
 
    g_extern.main_is_init = false;
 }

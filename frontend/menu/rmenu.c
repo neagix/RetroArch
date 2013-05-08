@@ -101,6 +101,12 @@ const char drive_mappings[][32] = {
 #endif
 };
 
+#if defined(_XBOX1)
+#define TICKER_LABEL_CHARS_MAX_PER_LINE 16
+#else
+#define TICKER_LABEL_CHARS_MAX_PER_LINE 25
+#endif
+
 #if defined__CELLOS_LV2__
 size_t drive_mapping_idx = 1;
 #elif defined(_XBOX1)
@@ -214,7 +220,7 @@ static void menu_stack_pop(unsigned menu_type)
       case LIBRETRO_CHOICE:
       case INGAME_MENU_CORE_OPTIONS:
       case INGAME_MENU_LOAD_GAME_HISTORY:
-      case INGAME_MENU_RESIZE:
+      case INGAME_MENU_CUSTOM_RATIO:
       case INGAME_MENU_SCREENSHOT:
          rgui->frame_buf_show = true;
          break;
@@ -225,6 +231,9 @@ static void menu_stack_pop(unsigned menu_type)
       case INGAME_MENU_PATH_OPTIONS:
          selected = FIRST_INGAME_MENU_SETTING;
          rgui->frame_buf_show = true;
+         break;
+      case INGAME_MENU_SHADER_OPTIONS:
+         selected = FIRST_VIDEO_SETTING;
          break;
 #ifdef HAVE_SHADER_MANAGER
       case CGP_CHOICE:
@@ -259,8 +268,13 @@ static void menu_stack_push(unsigned menu_type, bool prev_dir)
          selected = FIRST_INGAME_MENU_SETTING;
          break;
       case INGAME_MENU_VIDEO_OPTIONS:
+         selected = FIRST_VIDEO_SETTING;
+         break;
+#ifdef HAVE_SHADER_MANAGER
+      case INGAME_MENU_SHADER_OPTIONS:
          selected = FIRST_SHADERMAN_SETTING;
          break;
+#endif
       case INGAME_MENU_AUDIO_OPTIONS:
          selected = FIRST_AUDIO_SETTING;
          break;
@@ -271,7 +285,7 @@ static void menu_stack_push(unsigned menu_type, bool prev_dir)
          selected = FIRST_PATH_SETTING;
          break;
       case INGAME_MENU_SETTINGS:
-         selected = FIRST_VIDEO_SETTING;
+         selected = FIRST_SETTING;
          break;
       default:
          break;
@@ -345,11 +359,17 @@ static void display_menubar(uint8_t menu_type)
       case INGAME_MENU_VIDEO_OPTIONS_MODE:
          strlcpy(title, "Video Options", sizeof(title));
          break;
+#ifdef HAVE_SHADER_MANAGER
+      case INGAME_MENU_SHADER_OPTIONS:
+      case INGAME_MENU_SHADER_OPTIONS_MODE:
+         strlcpy(title, "Shader Options", sizeof(title));
+         break;
+#endif
       case INGAME_MENU_INPUT_OPTIONS:
       case INGAME_MENU_INPUT_OPTIONS_MODE:
          strlcpy(title, "Input Options", sizeof(title));
          break;
-      case INGAME_MENU_RESIZE:
+      case INGAME_MENU_CUSTOM_RATIO:
          strlcpy(title, "Resize Menu", sizeof(title));
          break;
       case INGAME_MENU_SCREENSHOT:
@@ -538,7 +558,7 @@ static int select_file(void *data, uint64_t input)
                break;
 #endif
             case INPUT_PRESET_CHOICE:
-               strlcpy(g_extern.file_state.input_cfg_path, path, sizeof(g_extern.file_state.input_cfg_path));
+               strlcpy(g_extern.input_config_path, path, sizeof(g_extern.input_config_path));
                config_read_keybinds(path);
                break;
             case BORDER_CHOICE:
@@ -741,7 +761,7 @@ static bool osk_callback_enter_rsound(void *data)
    {
       RARCH_LOG("OSK - Applying input data.\n");
       char tmp_str[256];
-      int num = wcstombs(tmp_str, g_extern.console.misc.oskutil_handle.text_buf, sizeof(tmp_str));
+      int num = wcstombs(tmp_str, rgui->oskutil_handle.text_buf, sizeof(tmp_str));
       tmp_str[num] = 0;
       strlcpy(g_settings.audio.device, tmp_str, sizeof(g_settings.audio.device));
       goto do_exit;
@@ -759,9 +779,9 @@ do_exit:
 
 static bool osk_callback_enter_rsound_init(void *data)
 {
-   oskutil_write_initial_message(&g_extern.console.misc.oskutil_handle, L"192.168.1.1");
-   oskutil_write_message(&g_extern.console.misc.oskutil_handle, L"Enter IP address for the RSound Server.");
-   oskutil_start(&g_extern.console.misc.oskutil_handle);
+   oskutil_write_initial_message(&rgui->oskutil_handle, L"192.168.1.1");
+   oskutil_write_message(&rgui->oskutil_handle, L"Enter IP address for the RSound Server.");
+   oskutil_start(&rgui->oskutil_handle);
 
    return true;
 }
@@ -773,7 +793,7 @@ static bool osk_callback_enter_filename(void *data)
       RARCH_LOG("OSK - Applying input data.\n");
       char tmp_str[256];
       char filepath[PATH_MAX];
-      int num = wcstombs(tmp_str, g_extern.console.misc.oskutil_handle.text_buf, sizeof(tmp_str));
+      int num = wcstombs(tmp_str, rgui->oskutil_handle.text_buf, sizeof(tmp_str));
       tmp_str[num] = 0;
 
       switch(rgui->osk_param)
@@ -806,9 +826,9 @@ do_exit:
 
 static bool osk_callback_enter_filename_init(void *data)
 {
-   oskutil_write_initial_message(&g_extern.console.misc.oskutil_handle, L"example");
-   oskutil_write_message(&g_extern.console.misc.oskutil_handle, L"Enter filename for preset");
-   oskutil_start(&g_extern.console.misc.oskutil_handle);
+   oskutil_write_initial_message(&rgui->oskutil_handle, L"example");
+   oskutil_write_message(&rgui->oskutil_handle, L"Enter filename for preset");
+   oskutil_start(&rgui->oskutil_handle);
 
    return true;
 }
@@ -1233,29 +1253,6 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
          if (input & (1ULL << DEVICE_NAV_START))
             strlcpy(g_settings.system_directory, default_paths.system_dir, sizeof(g_settings.system_directory));
          break;
-      case SETTING_ENABLE_SRAM_PATH:
-         if ((input & (1ULL << DEVICE_NAV_LEFT)) || (input & (1ULL << DEVICE_NAV_RIGHT)))
-         {
-            if (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE))
-               g_extern.lifecycle_mode_state &= ~(1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE);
-            else
-               g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE);
-         }
-
-         if (input & (1ULL << DEVICE_NAV_START))
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE);
-         break;
-      case SETTING_ENABLE_STATE_PATH:
-         if ((input & (1ULL << DEVICE_NAV_LEFT)) || (input & (1ULL << DEVICE_NAV_RIGHT)))
-         {
-            if (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE))
-               g_extern.lifecycle_mode_state &= ~(1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE);
-            else
-               g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE);
-         }
-         if (input & (1ULL << DEVICE_NAV_START))
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE);
-         break;
       case SETTING_PATH_DEFAULT_ALL:
          if ((input & (1ULL << DEVICE_NAV_LEFT)) || (input & (1ULL << DEVICE_NAV_RIGHT)) || (input & (1ULL << DEVICE_NAV_B)) || (input & (1ULL << DEVICE_NAV_START)))
          {
@@ -1467,7 +1464,7 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
          break;
       case SETTING_CUSTOM_VIEWPORT:
          if (input & (1ULL << DEVICE_NAV_B))
-            menu_stack_push(INGAME_MENU_RESIZE, false);
+            menu_stack_push(INGAME_MENU_CUSTOM_RATIO, false);
          break;
       case INGAME_MENU_CORE_OPTIONS_MODE:
          if (input & (1ULL << DEVICE_NAV_B))
@@ -1539,6 +1536,12 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
          if (input & (1ULL << DEVICE_NAV_B))
             menu_stack_push(INGAME_MENU_VIDEO_OPTIONS, false);
          break;
+#ifdef HAVE_SHADER_MANAGER
+      case INGAME_MENU_SHADER_OPTIONS_MODE:
+         if (input & (1ULL << DEVICE_NAV_B))
+            menu_stack_push(INGAME_MENU_SHADER_OPTIONS, false);
+         break;
+#endif
       case INGAME_MENU_AUDIO_OPTIONS_MODE:
          if (input & (1ULL << DEVICE_NAV_B))
             menu_stack_push(INGAME_MENU_AUDIO_OPTIONS, false);
@@ -1712,7 +1715,7 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
 static int select_setting(void *data, uint64_t input)
 {
    rgui_handle_t *rgui = (rgui_handle_t*)data;
-   static uint8_t first_setting = FIRST_VIDEO_SETTING;
+   static uint8_t first_setting = FIRST_SETTING;
    uint8_t items_pages[SETTING_LAST_LAST] = {0};
    uint8_t max_settings = 0;
 
@@ -1727,8 +1730,8 @@ static int select_setting(void *data, uint64_t input)
          max_settings = MAX_NO_OF_INGAME_MENU_SETTINGS;
          break;
       case INGAME_MENU_SETTINGS:
-         first_setting = FIRST_VIDEO_SETTING;
-         max_settings = MAX_NO_OF_VIDEO_SETTINGS;
+         first_setting = FIRST_SETTING;
+         max_settings = MAX_NO_OF_SETTINGS;
          break;
       case INGAME_MENU_INPUT_OPTIONS:
          first_setting = FIRST_CONTROLS_SETTING_PAGE_1;
@@ -1743,10 +1746,12 @@ static int select_setting(void *data, uint64_t input)
          max_settings = MAX_NO_OF_AUDIO_SETTINGS;
          break;
       case INGAME_MENU_VIDEO_OPTIONS:
-         first_setting = FIRST_SHADERMAN_SETTING;
-         max_settings = SHADERMAN_SHADER_LAST;
-
+         first_setting = FIRST_VIDEO_SETTING;
+         max_settings = MAX_NO_OF_VIDEO_SETTINGS;
+         break;
 #ifdef HAVE_SHADER_MANAGER
+      case INGAME_MENU_SHADER_OPTIONS:
+         first_setting = FIRST_SHADERMAN_SETTING;
          switch (rgui->shader.passes)
          {
             case 0:
@@ -1777,8 +1782,8 @@ static int select_setting(void *data, uint64_t input)
                max_settings = SHADERMAN_SHADER_7_SCALE+1;
                break;
          }
-#endif
          break;
+#endif
    }
 
    float y_increment = POSITION_Y_START;
@@ -1916,12 +1921,12 @@ static int select_setting(void *data, uint64_t input)
             break;
             /* emu-specific */
          case SETTING_EMU_SHOW_DEBUG_INFO_MSG:
-            strlcpy(text, "Debug info messages", sizeof(text));
+            strlcpy(text, "Debug Info Messages", sizeof(text));
             snprintf(setting_text, sizeof(setting_text), (g_extern.lifecycle_mode_state & (1ULL << MODE_FPS_DRAW)) ? "ON" : "OFF");
             strlcpy(comment, "INFO - Show onscreen debug messages.", sizeof(comment));
             break;
          case SETTING_EMU_SHOW_INFO_MSG:
-            strlcpy(text, "Info messages", sizeof(text));
+            strlcpy(text, "Info Messages", sizeof(text));
             snprintf(setting_text, sizeof(setting_text), (g_extern.lifecycle_mode_state & (1ULL << MODE_INFO_DRAW)) ? "ON" : "OFF");
             strlcpy(comment, "INFO - Show onscreen info messages in the menu.", sizeof(comment));
             break;
@@ -1974,7 +1979,7 @@ static int select_setting(void *data, uint64_t input)
             snprintf(comment, sizeof(comment), "INFO - [Custom BGM] is set to '%s'.", (g_extern.lifecycle_mode_state & (1ULL << MODE_AUDIO_CUSTOM_BGM_ENABLE)) ? "ON" : "OFF");
             break;
          case SETTING_PATH_DEFAULT_ROM_DIRECTORY:
-            strlcpy(text, "Browser directory", sizeof(text));
+            strlcpy(text, "Browser Directory", sizeof(text));
             strlcpy(setting_text, g_settings.rgui_browser_directory, sizeof(setting_text));
             strlcpy(comment, "INFO - Set the default startup browser directory path.", sizeof(comment));
             break;
@@ -2000,20 +2005,10 @@ static int select_setting(void *data, uint64_t input)
             strlcpy(setting_text, g_settings.system_directory, sizeof(setting_text));
             strlcpy(comment, "INFO - Set the default [System directory] path.", sizeof(comment));
             break;
-         case SETTING_ENABLE_SRAM_PATH:
-            snprintf(text, sizeof(text), "Custom SRAM Dir Enable");
-            snprintf(setting_text, sizeof(setting_text), (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE)) ? "ON" : "OFF");
-            snprintf(comment, sizeof(comment), "INFO - [Custom SRAM Dir Path] is set to '%s'.", (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE)) ? "ON" : "OFF");
-            break;
-         case SETTING_ENABLE_STATE_PATH:
-            snprintf(text, sizeof(text), "Custom Savestate Dir Enable");
-            snprintf(setting_text, sizeof(setting_text), (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE)) ? "ON" : "OFF");
-            snprintf(comment, sizeof(comment), "INFO - [Custom Savestate Dir Path] is set to '%s'.", (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE)) ? "ON" : "OFF");
-            break;
          case SETTING_CONTROLS_SCHEME:
             strlcpy(text, "Control Scheme Preset", sizeof(text));
-            snprintf(comment, sizeof(comment), "INFO - Input scheme preset [%s] is selected.", g_extern.file_state.input_cfg_path);
-            strlcpy(setting_text, g_extern.file_state.input_cfg_path, sizeof(setting_text));
+            snprintf(comment, sizeof(comment), "INFO - Input scheme preset [%s] is selected.", g_extern.input_config_path);
+            strlcpy(setting_text, g_extern.input_config_path, sizeof(setting_text));
             break;
          case SETTING_CONTROLS_NUMBER:
             strlcpy(text, "Player", sizeof(text));
@@ -2112,6 +2107,13 @@ static int select_setting(void *data, uint64_t input)
             strlcpy(setting_text, "...", sizeof(setting_text));
             strlcpy(comment, "Set core-specific options.", sizeof(comment));
             break;
+#ifdef HAVE_SHADER_MANAGER
+         case INGAME_MENU_SHADER_OPTIONS_MODE:
+            strlcpy(text, "Shader Options", sizeof(text));
+            strlcpy(setting_text, "...", sizeof(setting_text));
+            strlcpy(comment, "Set and manage shader options.", sizeof(comment));
+            break;
+#endif
          case INGAME_MENU_LOAD_GAME_HISTORY_MODE:
             strlcpy(text, "Load Game (History)", sizeof(text));
             strlcpy(setting_text, "...", sizeof(setting_text));
@@ -2277,6 +2279,9 @@ static int select_setting(void *data, uint64_t input)
 #endif
       }
 
+      char setting_text_buf[256];
+      menu_ticker_line(setting_text_buf, TICKER_LABEL_CHARS_MAX_PER_LINE, g_extern.frame_count / 15, setting_text, i == selected);
+
       if (!(j < NUM_ENTRY_PER_PAGE))
       {
          j = 0;
@@ -2303,7 +2308,7 @@ static int select_setting(void *data, uint64_t input)
       font_parms.color = WHITE;
 
       if (driver.video_poke->set_osd_msg)
-         driver.video_poke->set_osd_msg(driver.video_data, setting_text, &font_parms);
+         driver.video_poke->set_osd_msg(driver.video_data, setting_text_buf, &font_parms);
 
       if (i != selected)
          continue;
@@ -2921,27 +2926,24 @@ static int ingame_menu_screenshot(void *data, uint64_t input)
    rgui_handle_t *rgui = (rgui_handle_t*)data;
    rgui->frame_buf_show = false;
 
-   if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME))
-   {
-      if ((input & (1ULL << DEVICE_NAV_A)) || (input & (1ULL << DEVICE_NAV_MENU)))
-         menu_stack_pop(rgui->menu_type);
+   if ((input & (1ULL << DEVICE_NAV_A)) || (input & (1ULL << DEVICE_NAV_MENU)))
+      menu_stack_pop(rgui->menu_type);
 
 #ifdef HAVE_SCREENSHOTS
-      if (input & (1ULL << DEVICE_NAV_B))
-      {
-         const uint16_t *data = (const uint16_t*)g_extern.frame_cache.data;
-         unsigned width       = g_extern.frame_cache.width;
-         unsigned height      = g_extern.frame_cache.height;
-         int pitch            = g_extern.frame_cache.pitch;
+   if (input & (1ULL << DEVICE_NAV_B))
+   {
+      const uint16_t *data = (const uint16_t*)g_extern.frame_cache.data;
+      unsigned width       = g_extern.frame_cache.width;
+      unsigned height      = g_extern.frame_cache.height;
+      int pitch            = g_extern.frame_cache.pitch;
 
-         // Negative pitch is needed as screenshot takes bottom-up,
-         // but we use top-down.
-         screenshot_dump(g_settings.screenshot_directory,
-               data + (height - 1) * (pitch >> 1), 
-               width, height, -pitch, false);
-      }
-#endif
+      // Negative pitch is needed as screenshot takes bottom-up,
+      // but we use top-down.
+      screenshot_dump(g_settings.screenshot_directory,
+            data + (height - 1) * (pitch >> 1), 
+            width, height, -pitch, false);
    }
+#endif
 
    return 0;
 }
@@ -2961,9 +2963,7 @@ int rgui_input_postprocess(void *data, uint64_t old_state)
    if ((rgui->trigger_state & (1ULL << DEVICE_NAV_MENU)) &&
       g_extern.main_is_init)
    {
-      if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME))
-         g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_INGAME_EXIT);
-
+      g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_INGAME_EXIT);
       g_extern.lifecycle_mode_state |= (1ULL << MODE_GAME);
 
       ret = -1;
@@ -2978,11 +2978,10 @@ int rgui_input_postprocess(void *data, uint64_t old_state)
       ret = -1;
    }
 
-   if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME_EXIT) &&
-         g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME))
+   if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME_EXIT))
    {
       menu_stack_pop(rgui->menu_type);
-      g_extern.lifecycle_mode_state &= ~((1ULL << MODE_MENU_INGAME) | (1ULL << MODE_MENU_INGAME_EXIT));
+      g_extern.lifecycle_mode_state &= ~(1ULL << MODE_MENU_INGAME_EXIT);
    }
 
    return ret;
@@ -3014,7 +3013,7 @@ int rgui_iterate(rgui_handle_t *rgui)
 
    switch(rgui->menu_type)
    {
-      case INGAME_MENU_RESIZE:
+      case INGAME_MENU_CUSTOM_RATIO:
          return ingame_menu_resize(rgui, rgui->trigger_state);
       case INGAME_MENU_CORE_OPTIONS:
          return ingame_menu_core_options(rgui, rgui->trigger_state);
@@ -3043,6 +3042,7 @@ int rgui_iterate(rgui_handle_t *rgui)
       case INGAME_MENU:
       case INGAME_MENU_SETTINGS:
       case INGAME_MENU_VIDEO_OPTIONS:
+      case INGAME_MENU_SHADER_OPTIONS:
       case INGAME_MENU_AUDIO_OPTIONS:
       case INGAME_MENU_INPUT_OPTIONS:
       case INGAME_MENU_PATH_OPTIONS:
@@ -3068,7 +3068,7 @@ rgui_handle_t *rgui_init(void)
 
 
 #ifdef HAVE_OSKUTIL
-   oskutil_params *osk = &g_extern.console.misc.oskutil_handle;
+   oskutil_params *osk = &rgui->oskutil_handle;
    oskutil_init(osk, 0);
 #endif
 

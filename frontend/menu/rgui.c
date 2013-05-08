@@ -106,6 +106,7 @@ unsigned RGUI_HEIGHT = 240;
 uint16_t menu_framebuf[400 * 240];
 
 static int shader_manager_toggle_setting(rgui_handle_t *rgui, unsigned setting, rgui_action_t action);
+static int video_option_toggle_setting(rgui_handle_t *rgui, unsigned setting, rgui_action_t action);
 
 static const unsigned rgui_controller_lut[] = {
    RETRO_DEVICE_ID_JOYPAD_UP,
@@ -178,10 +179,13 @@ static bool menu_type_is_settings(unsigned type)
    return type == RGUI_SETTINGS ||
       type == RGUI_SETTINGS_CORE_OPTIONS ||
       type == RGUI_SETTINGS_VIDEO_OPTIONS ||
+#ifdef HAVE_SHADER_MANAGER
       type == RGUI_SETTINGS_SHADER_OPTIONS ||
+#endif
       type == RGUI_SETTINGS_AUDIO_OPTIONS ||
       type == RGUI_SETTINGS_DISK_OPTIONS ||
       type == RGUI_SETTINGS_PATH_OPTIONS ||
+      type == RGUI_SETTINGS_OPTIONS ||
       (type == RGUI_SETTINGS_INPUT_OPTIONS);
 }
 
@@ -218,7 +222,7 @@ rgui_handle_t *rgui_init(void)
       RARCH_ERR("no font bmp or bin, abort");
       /* TODO - should be refactored - perhaps don't do rarch_fail but instead
        * exit program */
-      g_extern.lifecycle_mode_state &= ~((1ULL << MODE_MENU) | (1ULL << MODE_MENU_INGAME) | (1ULL << MODE_GAME));
+      g_extern.lifecycle_mode_state &= ~((1ULL << MODE_MENU) | (1ULL << MODE_GAME));
       g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
       return NULL;
    }
@@ -405,8 +409,10 @@ static void render_text(rgui_handle_t *rgui)
       snprintf(title, sizeof(title), "DISK APPEND %s", dir);
    else if (menu_type == RGUI_SETTINGS_VIDEO_OPTIONS)
       strlcpy(title, "VIDEO OPTIONS", sizeof(title));
+#ifdef HAVE_SHADER_MANAGER
    else if (menu_type == RGUI_SETTINGS_SHADER_OPTIONS)
       strlcpy(title, "SHADER OPTIONS", sizeof(title));
+#endif
    else if (menu_type == RGUI_SETTINGS_AUDIO_OPTIONS)
       strlcpy(title, "AUDIO OPTIONS", sizeof(title));
    else if (menu_type == RGUI_SETTINGS_DISK_OPTIONS)
@@ -419,6 +425,7 @@ static void render_text(rgui_handle_t *rgui)
 #endif
    else if ((menu_type == RGUI_SETTINGS_INPUT_OPTIONS) ||
          (menu_type == RGUI_SETTINGS_PATH_OPTIONS) ||
+         (menu_type == RGUI_SETTINGS_OPTIONS) ||
          (menu_type == RGUI_SETTINGS_CUSTOM_VIEWPORT || menu_type == RGUI_SETTINGS_CUSTOM_VIEWPORT_2) ||
          menu_type == RGUI_SETTINGS)
       snprintf(title, sizeof(title), "MENU %s", dir);
@@ -436,7 +443,7 @@ static void render_text(rgui_handle_t *rgui)
    }
 
    char title_buf[256];
-   menu_ticker_line(title_buf, TERM_WIDTH - 3, g_extern.frame_count / 15, title);
+   menu_ticker_line(title_buf, TERM_WIDTH - 3, g_extern.frame_count / 15, title, true);
    blit_line(rgui, TERM_START_X + 15, 15, title_buf, true);
 
    char title_msg[64];
@@ -586,12 +593,6 @@ static void render_text(rgui_handle_t *rgui)
             case RGUI_SETTINGS_AUDIO_CONTROL_RATE_DELTA:
                snprintf(type_str, sizeof(type_str), "%.3f", g_settings.audio.rate_control_delta);
                break;
-            case RGUI_SETTINGS_SRAM_DIR:
-               snprintf(type_str, sizeof(type_str), (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE)) ? "ON" : "OFF");
-               break;
-            case RGUI_SETTINGS_STATE_DIR:
-               snprintf(type_str, sizeof(type_str), (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE)) ? "ON" : "OFF");
-               break;
             case RGUI_SETTINGS_DEBUG_TEXT:
                snprintf(type_str, sizeof(type_str), (g_extern.lifecycle_mode_state & (1ULL << MODE_FPS_DRAW)) ? "ON" : "OFF");
                break;
@@ -630,16 +631,17 @@ static void render_text(rgui_handle_t *rgui)
             case RGUI_SETTINGS_CUSTOM_VIEWPORT:
             case RGUI_SETTINGS_TOGGLE_FULLSCREEN:
             case RGUI_SETTINGS_VIDEO_OPTIONS:
-            case RGUI_SETTINGS_SHADER_OPTIONS:
             case RGUI_SETTINGS_AUDIO_OPTIONS:
             case RGUI_SETTINGS_DISK_OPTIONS:
 #ifdef HAVE_SHADER_MANAGER
+            case RGUI_SETTINGS_SHADER_OPTIONS:
             case RGUI_SETTINGS_SHADER_PRESET:
 #endif
             case RGUI_SETTINGS_CORE:
             case RGUI_SETTINGS_DISK_APPEND:
             case RGUI_SETTINGS_INPUT_OPTIONS:
             case RGUI_SETTINGS_PATH_OPTIONS:
+            case RGUI_SETTINGS_OPTIONS:
                strlcpy(type_str, "...", sizeof(type_str));
                break;
             case RGUI_SETTINGS_BIND_PLAYER:
@@ -734,23 +736,24 @@ static void render_text(rgui_handle_t *rgui)
 
       char entry_title_buf[256];
       char type_str_buf[64];
+      bool selected = i == rgui->selection_ptr;
 
       strlcpy(entry_title_buf, path, sizeof(entry_title_buf));
       strlcpy(type_str_buf, type_str, sizeof(type_str_buf));
 
       if ((type == RGUI_FILE_PLAIN || type == RGUI_FILE_DIRECTORY))
-         menu_ticker_line(entry_title_buf, TERM_WIDTH - (w + 1 + 2), g_extern.frame_count / 15, path);
+         menu_ticker_line(entry_title_buf, TERM_WIDTH - (w + 1 + 2), g_extern.frame_count / 15, path, selected);
       else
-         menu_ticker_line(type_str_buf, w, g_extern.frame_count / 15, type_str);
+         menu_ticker_line(type_str_buf, w, g_extern.frame_count / 15, type_str, selected);
 
       snprintf(message, sizeof(message), "%c %-*.*s %-*s",
-            i == rgui->selection_ptr ? '>' : ' ',
+            selected ? '>' : ' ',
             TERM_WIDTH - (w + 1 + 2), TERM_WIDTH - (w + 1 + 2),
             entry_title_buf,
             w,
             type_str_buf);
 
-      blit_line(rgui, x, y, message, i == rgui->selection_ptr);
+      blit_line(rgui, x, y, message, selected);
    }
 
 #ifdef GEKKO
@@ -803,8 +806,12 @@ static int rgui_settings_toggle_setting(rgui_handle_t *rgui, unsigned setting, r
 {
    unsigned port = rgui->current_pad;
 
-   if (setting >= RGUI_SETTINGS_VIDEO_OPTIONS_FIRST && setting <= RGUI_SETTINGS_SHADER_LAST)
+   if (setting >= RGUI_SETTINGS_VIDEO_OPTIONS_FIRST && setting <= RGUI_SETTINGS_VIDEO_OPTIONS_LAST)
+      return video_option_toggle_setting(rgui, setting, action);
+#ifdef HAVE_SHADER_MANAGER
+   else if (setting >= RGUI_SETTINGS_SHADER_FILTER && setting <= RGUI_SETTINGS_SHADER_LAST)
       return shader_manager_toggle_setting(rgui, setting, action);
+#endif
    if (setting >= RGUI_SETTINGS_CORE_OPTION_START)
       return rgui_core_setting_toggle(setting, action);
 
@@ -919,18 +926,6 @@ static int rgui_settings_toggle_setting(rgui_handle_t *rgui, unsigned setting, r
             settings_set(1ULL << S_AUDIO_CONTROL_RATE_DECREMENT);
          else if (action == RGUI_ACTION_RIGHT)
             settings_set(1ULL << S_AUDIO_CONTROL_RATE_INCREMENT);
-         break;
-      case RGUI_SETTINGS_SRAM_DIR:
-         if (action == RGUI_ACTION_START || action == RGUI_ACTION_LEFT)
-            g_extern.lifecycle_mode_state &= ~(1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE);
-         else if (action == RGUI_ACTION_RIGHT)
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE);
-         break;
-      case RGUI_SETTINGS_STATE_DIR:
-         if (action == RGUI_ACTION_START || action == RGUI_ACTION_LEFT)
-            g_extern.lifecycle_mode_state &= ~(1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE);
-         else if (action == RGUI_ACTION_RIGHT)
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE);
          break;
       case RGUI_SETTINGS_DEBUG_TEXT:
          if (action == RGUI_ACTION_START || action == RGUI_ACTION_LEFT)
@@ -1202,6 +1197,12 @@ static void rgui_settings_disc_options_populate_entries(rgui_handle_t *rgui)
    rgui_list_push(rgui->selection_buf, "Disk Image Append", RGUI_SETTINGS_DISK_APPEND, 0);
 }
 
+static void rgui_settings_options_populate_entries(rgui_handle_t *rgui)
+{
+   rgui_list_clear(rgui->selection_buf);
+   rgui_list_push(rgui->selection_buf, "Debug Info Messages", RGUI_SETTINGS_DEBUG_TEXT, 0);
+}
+
 static void rgui_settings_populate_entries(rgui_handle_t *rgui)
 {
    rgui_list_clear(rgui->selection_buf);
@@ -1217,6 +1218,7 @@ static void rgui_settings_populate_entries(rgui_handle_t *rgui)
    rgui_list_push(rgui->selection_buf, "Audio Options", RGUI_SETTINGS_AUDIO_OPTIONS, 0);
    rgui_list_push(rgui->selection_buf, "Input Options", RGUI_SETTINGS_INPUT_OPTIONS, 0);
    rgui_list_push(rgui->selection_buf, "Path Options", RGUI_SETTINGS_PATH_OPTIONS, 0);
+   rgui_list_push(rgui->selection_buf, "Settings", RGUI_SETTINGS_OPTIONS, 0);
 
    if (g_extern.main_is_init && !g_extern.libretro_dummy)
    {
@@ -1236,11 +1238,6 @@ static void rgui_settings_populate_entries(rgui_handle_t *rgui)
 #if defined(HAVE_THREADS) && !defined(RARCH_CONSOLE)
    rgui_list_push(rgui->selection_buf, "SRAM Autosave", RGUI_SETTINGS_SRAM_AUTOSAVE, 0);
 #endif
-#ifdef GEKKO
-   rgui_list_push(rgui->selection_buf, "SRAM Saves in \"sram\" Dir", RGUI_SETTINGS_SRAM_DIR, 0);
-   rgui_list_push(rgui->selection_buf, "State Saves in \"state\" Dir", RGUI_SETTINGS_STATE_DIR, 0);
-#endif
-   rgui_list_push(rgui->selection_buf, "Debug Text", RGUI_SETTINGS_DEBUG_TEXT, 0);
 #ifndef HAVE_DYNAMIC
    rgui_list_push(rgui->selection_buf, "Restart RetroArch", RGUI_SETTINGS_RESTART_EMULATOR, 0);
 #endif
@@ -1348,7 +1345,7 @@ static enum rarch_shader_type shader_manager_get_type(const struct gfx_shader *s
    return type;
 }
 
-static void shader_manager_set_preset(enum rarch_shader_type type, const char *path)
+static void shader_manager_set_preset(struct gfx_shader *shader, enum rarch_shader_type type, const char *path)
 {
    RARCH_LOG("Setting RGUI shader: %s.\n", path ? path : "N/A (stock)");
    bool ret = video_set_shader_func(type, path);
@@ -1359,6 +1356,22 @@ static void shader_manager_set_preset(enum rarch_shader_type type, const char *p
       strlcpy(g_settings.video.shader_path, path ? path : "",
             sizeof(g_settings.video.shader_path));
       g_settings.video.shader_enable = true;
+
+      if (path && shader)
+      {
+         // Load stored CGP into RGUI menu on success.
+         // Used when a preset is directly loaded.
+         // No point in updating when the CGP was created from RGUI itself.
+         config_file_t *conf = config_file_new(path);
+         if (conf)
+         {
+            gfx_shader_read_conf_cgp(conf, shader);
+            gfx_shader_resolve_relative(shader, path);
+            config_file_free(conf);
+         }
+
+         rgui->need_refresh = true;
+      }
    }
    else
    {
@@ -1366,177 +1379,14 @@ static void shader_manager_set_preset(enum rarch_shader_type type, const char *p
       g_settings.video.shader_enable = false;
    }
 }
-#endif
 
 static int shader_manager_toggle_setting(rgui_handle_t *rgui, unsigned setting, rgui_action_t action)
 {
-#ifdef HAVE_SHADER_MANAGER
    unsigned dist_shader = setting - RGUI_SETTINGS_SHADER_0;
    unsigned dist_filter = setting - RGUI_SETTINGS_SHADER_0_FILTER;
    unsigned dist_scale  = setting - RGUI_SETTINGS_SHADER_0_SCALE;
-#endif
 
-   if (setting == RGUI_SETTINGS_VIDEO_ROTATION)
-   {
-      if (action == RGUI_ACTION_START)
-      {
-         settings_set(1ULL << S_DEF_AUDIO_CONTROL_RATE);
-         video_set_rotation_func(g_extern.console.screen.orientation);
-      }
-      else if (action == RGUI_ACTION_LEFT)
-      {
-         settings_set(1ULL << S_ROTATION_DECREMENT);
-         video_set_rotation_func(g_extern.console.screen.orientation);
-      }
-      else if (action == RGUI_ACTION_RIGHT)
-      {
-         settings_set(1ULL << S_ROTATION_INCREMENT);
-         video_set_rotation_func(g_extern.console.screen.orientation);
-      }
-   }
-   else if (setting == RGUI_SETTINGS_VIDEO_FILTER)
-   {
-      if (action == RGUI_ACTION_START)
-         settings_set(1ULL << S_DEF_HW_TEXTURE_FILTER);
-      else
-         settings_set(1ULL << S_HW_TEXTURE_FILTER);
-
-      if (driver.video_poke->set_filtering)
-         driver.video_poke->set_filtering(driver.video_data, 1, g_settings.video.smooth);
-   }
-   else if (setting == RGUI_SETTINGS_VIDEO_GAMMA)
-   {
-      if (action == RGUI_ACTION_START)
-      {
-         g_extern.console.screen.gamma_correction = 0;
-         if (driver.video_poke->apply_state_changes)
-            driver.video_poke->apply_state_changes(driver.video_data);
-      }
-      else if (action == RGUI_ACTION_LEFT)
-      {
-         if(g_extern.console.screen.gamma_correction > 0)
-         {
-            g_extern.console.screen.gamma_correction--;
-            if (driver.video_poke->apply_state_changes)
-               driver.video_poke->apply_state_changes(driver.video_data);
-         }
-      }
-      else if (action == RGUI_ACTION_RIGHT)
-      {
-         if(g_extern.console.screen.gamma_correction < MAX_GAMMA_SETTING)
-         {
-            g_extern.console.screen.gamma_correction++;
-            if (driver.video_poke->apply_state_changes)
-               driver.video_poke->apply_state_changes(driver.video_data);
-         }
-      }
-   }
-   else if (setting == RGUI_SETTINGS_VIDEO_INTEGER_SCALE)
-   {
-      if (action == RGUI_ACTION_START)
-         settings_set(1ULL << S_DEF_SCALE_INTEGER);
-      else if (action == RGUI_ACTION_LEFT ||
-            action == RGUI_ACTION_RIGHT ||
-            action == RGUI_ACTION_OK)
-         settings_set(1ULL << S_SCALE_INTEGER_TOGGLE);
-
-      if (driver.video_poke->apply_state_changes)
-         driver.video_poke->apply_state_changes(driver.video_data);
-   }
-   else if (setting == RGUI_SETTINGS_VIDEO_ASPECT_RATIO)
-   {
-      if (action == RGUI_ACTION_START)
-         settings_set(1ULL << S_DEF_ASPECT_RATIO);
-      else if (action == RGUI_ACTION_LEFT)
-         settings_set(1ULL << S_ASPECT_RATIO_DECREMENT);
-      else if (action == RGUI_ACTION_RIGHT)
-         settings_set(1ULL << S_ASPECT_RATIO_INCREMENT);
-
-      if (driver.video_poke->set_aspect_ratio)
-         driver.video_poke->set_aspect_ratio(driver.video_data, g_settings.video.aspect_ratio_idx);
-   }
-#ifndef RARCH_PERFORMANCE_MODE
-   else if (setting == RGUI_SETTINGS_TOGGLE_FULLSCREEN)
-   {
-      if (action == RGUI_ACTION_OK)
-         rarch_set_fullscreen(!g_settings.video.fullscreen);
-   }
-#endif
-#ifdef HW_RVL
-   else if (setting == RGUI_SETTINGS_VIDEO_RESOLUTION)
-   {
-      if (action == RGUI_ACTION_LEFT)
-      {
-         if(rgui_current_gx_resolution > 0)
-         {
-            rgui_current_gx_resolution--;
-            gx_set_video_mode(rgui_gx_resolutions[rgui_current_gx_resolution][0], rgui_gx_resolutions[rgui_current_gx_resolution][1]);
-         }
-      }
-      else if (action == RGUI_ACTION_RIGHT)
-      {
-         if(rgui_current_gx_resolution < GX_RESOLUTIONS_LAST - 1)
-         {
-#ifdef HW_RVL
-            if ((rgui_current_gx_resolution + 1) > GX_RESOLUTIONS_640_480)
-               if (CONF_GetVideo() != CONF_VIDEO_PAL)
-                  return 0;
-#endif
-
-            rgui_current_gx_resolution++;
-            gx_set_video_mode(rgui_gx_resolutions[rgui_current_gx_resolution][0], rgui_gx_resolutions[rgui_current_gx_resolution][1]);
-         }
-      }
-   }
-   else if (setting == RGUI_SETTINGS_VIDEO_SOFT_FILTER)
-   {
-      if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE))
-         g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE);
-      else
-         g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE);
-
-      if (driver.video_poke->apply_state_changes)
-         driver.video_poke->apply_state_changes(driver.video_data);
-   }
-#endif
-   else if (setting == RGUI_SETTINGS_VIDEO_VSYNC)
-   {
-      switch (action)
-      {
-         case RGUI_ACTION_START:
-            g_settings.video.vsync = true;
-            break;
-
-         case RGUI_ACTION_LEFT:
-         case RGUI_ACTION_RIGHT:
-         case RGUI_ACTION_OK:
-            g_settings.video.vsync = !g_settings.video.vsync;
-            break;
-
-         default:
-            break;
-      }
-   }
-   else if (setting == RGUI_SETTINGS_VIDEO_HARD_SYNC)
-   {
-      switch (action)
-      {
-         case RGUI_ACTION_START:
-            g_settings.video.hard_sync = false;
-            break;
-
-         case RGUI_ACTION_LEFT:
-         case RGUI_ACTION_RIGHT:
-         case RGUI_ACTION_OK:
-            g_settings.video.hard_sync = !g_settings.video.hard_sync;
-            break;
-
-         default:
-            break;
-      }
-   }
-#ifdef HAVE_SHADER_MANAGER
-   else if (setting == RGUI_SETTINGS_SHADER_FILTER)
+   if (setting == RGUI_SETTINGS_SHADER_FILTER)
    {
       switch (action)
       {
@@ -1578,7 +1428,7 @@ static int shader_manager_toggle_setting(rgui_handle_t *rgui, unsigned setting, 
          config_file_write(conf, cgp_path);
          config_file_free(conf);
 
-         shader_manager_set_preset(type, cgp_path); 
+         shader_manager_set_preset(NULL, type, cgp_path); 
       }
       else
       {
@@ -1591,7 +1441,7 @@ static int shader_manager_toggle_setting(rgui_handle_t *rgui, unsigned setting, 
             type = RARCH_SHADER_CG;
 #endif
          }
-         shader_manager_set_preset(type, NULL);
+         shader_manager_set_preset(NULL, type, NULL);
       }
    }
    else if (setting == RGUI_SETTINGS_SHADER_PASSES)
@@ -1626,8 +1476,6 @@ static int shader_manager_toggle_setting(rgui_handle_t *rgui, unsigned setting, 
          &rgui->shader.pass[dist_shader] : NULL;
       switch (action)
       {
-         case RGUI_ACTION_LEFT:
-         case RGUI_ACTION_RIGHT:
          case RGUI_ACTION_OK:
             rgui_list_push(rgui->menu_stack, g_settings.video.shader_dir, setting, rgui->selection_ptr);
             rgui->selection_ptr = 0;
@@ -1693,7 +1541,178 @@ static int shader_manager_toggle_setting(rgui_handle_t *rgui, unsigned setting, 
          break;
       }
    }
+
+   return 0;
+}
+
+
 #endif
+
+static int video_option_toggle_setting(rgui_handle_t *rgui, unsigned setting, rgui_action_t action)
+{
+   switch (setting)
+   {
+      case RGUI_SETTINGS_VIDEO_ROTATION:
+         if (action == RGUI_ACTION_START)
+         {
+            settings_set(1ULL << S_DEF_AUDIO_CONTROL_RATE);
+            video_set_rotation_func(g_extern.console.screen.orientation);
+         }
+         else if (action == RGUI_ACTION_LEFT)
+         {
+            settings_set(1ULL << S_ROTATION_DECREMENT);
+            video_set_rotation_func(g_extern.console.screen.orientation);
+         }
+         else if (action == RGUI_ACTION_RIGHT)
+         {
+            settings_set(1ULL << S_ROTATION_INCREMENT);
+            video_set_rotation_func(g_extern.console.screen.orientation);
+         }
+         break;
+
+      case RGUI_SETTINGS_VIDEO_FILTER:
+         if (action == RGUI_ACTION_START)
+            settings_set(1ULL << S_DEF_HW_TEXTURE_FILTER);
+         else
+            settings_set(1ULL << S_HW_TEXTURE_FILTER);
+
+         if (driver.video_poke->set_filtering)
+            driver.video_poke->set_filtering(driver.video_data, 1, g_settings.video.smooth);
+         break;
+
+      case RGUI_SETTINGS_VIDEO_GAMMA:
+         if (action == RGUI_ACTION_START)
+         {
+            g_extern.console.screen.gamma_correction = 0;
+            if (driver.video_poke->apply_state_changes)
+               driver.video_poke->apply_state_changes(driver.video_data);
+         }
+         else if (action == RGUI_ACTION_LEFT)
+         {
+            if(g_extern.console.screen.gamma_correction > 0)
+            {
+               g_extern.console.screen.gamma_correction--;
+               if (driver.video_poke->apply_state_changes)
+                  driver.video_poke->apply_state_changes(driver.video_data);
+            }
+         }
+         else if (action == RGUI_ACTION_RIGHT)
+         {
+            if(g_extern.console.screen.gamma_correction < MAX_GAMMA_SETTING)
+            {
+               g_extern.console.screen.gamma_correction++;
+               if (driver.video_poke->apply_state_changes)
+                  driver.video_poke->apply_state_changes(driver.video_data);
+            }
+         }
+         break;
+
+      case RGUI_SETTINGS_VIDEO_INTEGER_SCALE:
+         if (action == RGUI_ACTION_START)
+            settings_set(1ULL << S_DEF_SCALE_INTEGER);
+         else if (action == RGUI_ACTION_LEFT ||
+               action == RGUI_ACTION_RIGHT ||
+               action == RGUI_ACTION_OK)
+            settings_set(1ULL << S_SCALE_INTEGER_TOGGLE);
+
+         if (driver.video_poke->apply_state_changes)
+            driver.video_poke->apply_state_changes(driver.video_data);
+         break;
+
+      case RGUI_SETTINGS_VIDEO_ASPECT_RATIO:
+         if (action == RGUI_ACTION_START)
+            settings_set(1ULL << S_DEF_ASPECT_RATIO);
+         else if (action == RGUI_ACTION_LEFT)
+            settings_set(1ULL << S_ASPECT_RATIO_DECREMENT);
+         else if (action == RGUI_ACTION_RIGHT)
+            settings_set(1ULL << S_ASPECT_RATIO_INCREMENT);
+
+         if (driver.video_poke->set_aspect_ratio)
+            driver.video_poke->set_aspect_ratio(driver.video_data, g_settings.video.aspect_ratio_idx);
+         break;
+
+#ifndef RARCH_PERFORMANCE_MODE
+      case RGUI_SETTINGS_TOGGLE_FULLSCREEN:
+         if (action == RGUI_ACTION_OK)
+            rarch_set_fullscreen(!g_settings.video.fullscreen);
+         break;
+#endif
+
+#ifdef HW_RVL
+      case RGUI_SETTINGS_VIDEO_RESOLUTION:
+         if (action == RGUI_ACTION_LEFT)
+         {
+            if(rgui_current_gx_resolution > 0)
+            {
+               rgui_current_gx_resolution--;
+               gx_set_video_mode(rgui_gx_resolutions[rgui_current_gx_resolution][0], rgui_gx_resolutions[rgui_current_gx_resolution][1]);
+            }
+         }
+         else if (action == RGUI_ACTION_RIGHT)
+         {
+            if (rgui_current_gx_resolution < GX_RESOLUTIONS_LAST - 1)
+            {
+               if ((rgui_current_gx_resolution + 1) > GX_RESOLUTIONS_640_480)
+                  if (CONF_GetVideo() != CONF_VIDEO_PAL)
+                     return 0;
+
+               rgui_current_gx_resolution++;
+               gx_set_video_mode(rgui_gx_resolutions[rgui_current_gx_resolution][0],
+                     rgui_gx_resolutions[rgui_current_gx_resolution][1]);
+            }
+         }
+         break;
+
+      case RGUI_SETTINGS_VIDEO_SOFT_FILTER:
+         if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE))
+            g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE);
+         else
+            g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE);
+
+         if (driver.video_poke->apply_state_changes)
+            driver.video_poke->apply_state_changes(driver.video_data);
+         break;
+#endif
+
+      case RGUI_SETTINGS_VIDEO_VSYNC:
+         switch (action)
+         {
+            case RGUI_ACTION_START:
+               g_settings.video.vsync = true;
+               break;
+
+            case RGUI_ACTION_LEFT:
+            case RGUI_ACTION_RIGHT:
+            case RGUI_ACTION_OK:
+               g_settings.video.vsync = !g_settings.video.vsync;
+               break;
+
+            default:
+               break;
+         }
+         break;
+
+      case RGUI_SETTINGS_VIDEO_HARD_SYNC:
+         switch (action)
+         {
+            case RGUI_ACTION_START:
+               g_settings.video.hard_sync = false;
+               break;
+
+            case RGUI_ACTION_LEFT:
+            case RGUI_ACTION_RIGHT:
+            case RGUI_ACTION_OK:
+               g_settings.video.hard_sync = !g_settings.video.hard_sync;
+               break;
+
+            default:
+               break;
+         }
+         break;
+
+      default:
+         break;
+   }
 
    return 0;
 }
@@ -2037,6 +2056,8 @@ static int rgui_settings_iterate(rgui_handle_t *rgui, rgui_action_t action)
          rgui_settings_controller_populate_entries(rgui);
       else if ((menu_type == RGUI_SETTINGS_PATH_OPTIONS))
          rgui_settings_path_populate_entries(rgui);
+      else if ((menu_type == RGUI_SETTINGS_OPTIONS))
+         rgui_settings_options_populate_entries(rgui);
       else if (menu_type == RGUI_SETTINGS_CORE_OPTIONS)
          rgui_settings_core_options_populate_entries(rgui);
       else if (menu_type == RGUI_SETTINGS_AUDIO_OPTIONS)
@@ -2296,7 +2317,7 @@ int rgui_iterate(rgui_handle_t *rgui)
                {
                   char shader_path[PATH_MAX];
                   fill_pathname_join(shader_path, dir, path, sizeof(shader_path));
-                  shader_manager_set_preset(gfx_shader_parse_type(shader_path, RARCH_SHADER_NONE),
+                  shader_manager_set_preset(&rgui->shader, gfx_shader_parse_type(shader_path, RARCH_SHADER_NONE),
                         shader_path);
                }
                else
@@ -2392,7 +2413,6 @@ int rgui_iterate(rgui_handle_t *rgui)
          rgui->need_refresh = true;
          while (rgui->menu_stack->size > 1)
             rgui_list_pop(rgui->menu_stack, &rgui->selection_ptr);
-         g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_INGAME);
          return rgui_settings_iterate(rgui, RGUI_ACTION_REFRESH);
 
       case RGUI_ACTION_MESSAGE:
@@ -2483,17 +2503,13 @@ int rgui_input_postprocess(void *data, uint64_t old_state)
          g_extern.main_is_init &&
          !g_extern.libretro_dummy)
    {
-      if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME))
-         g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_INGAME_EXIT);
-
+      g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_INGAME_EXIT);
       g_extern.lifecycle_mode_state |= (1ULL << MODE_GAME);
       ret = -1;
    }
 
-   if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME_EXIT) &&
-         g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME))
-      g_extern.lifecycle_mode_state &= ~((1ULL << MODE_MENU_INGAME) 
-            | (1ULL << MODE_MENU_INGAME_EXIT));
+   if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME_EXIT))
+      g_extern.lifecycle_mode_state &= ~(1ULL << MODE_MENU_INGAME_EXIT);
 
    if (ret < 0)
    {

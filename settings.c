@@ -223,7 +223,14 @@ void config_set_defaults(void)
    for (unsigned i = 1; i < MAX_PLAYERS; i++)
       memcpy(g_settings.input.binds[i], retro_keybinds_rest, sizeof(retro_keybinds_rest));
 
-   memcpy(g_settings.input.autoconf_binds, g_settings.input.binds, sizeof(g_settings.input.binds));
+   for (unsigned i = 0; i < MAX_PLAYERS; i++)
+   {
+      for (unsigned j = 0; j < RARCH_BIND_LIST_END; j++)
+      {
+         g_settings.input.autoconf_binds[i][j].joykey = NO_BTN;
+         g_settings.input.autoconf_binds[i][j].joyaxis = AXIS_NONE;
+      }
+   }
 
    // Verify that binds are in proper order.
    for (int i = 0; i < MAX_PLAYERS; i++)
@@ -488,8 +495,6 @@ bool config_load_file(const char *path)
    bool custom_bgm_enable = false;
    bool flicker_filter_enable = false;
    bool soft_filter_enable = false;
-   bool sram_dir_enable = false;
-   bool state_dir_enable = false;
 
 #ifdef HAVE_RMENU
    if (config_get_path(conf, "menu_texture_path", tmp_str, sizeof(tmp_str)))
@@ -542,22 +547,6 @@ bool config_load_file(const char *path)
          g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE);
       else 
          g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE);
-   }
-
-   if (config_get_bool(conf, "sram_dir_enable", &sram_dir_enable))
-   {
-      if (sram_dir_enable)
-         g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE);
-      else
-         g_extern.lifecycle_mode_state &= ~(1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE);
-   }
-
-   if (config_get_bool(conf, "savestate_dir_enable", &state_dir_enable))
-   {
-      if (state_dir_enable)
-         g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE);
-      else
-         g_extern.lifecycle_mode_state &= ~(1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE);
    }
 
    CONFIG_GET_INT_EXTERN(console.screen.flicker_filter_index, "flicker_filter_index");
@@ -995,16 +984,6 @@ bool config_save_file(const char *path)
       config_set_bool(conf, "custom_bgm_enable", true);
    else
       config_set_bool(conf, "custom_bgm_enable", false);
-
-   if (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_SRAM_DIR_ENABLE))
-      config_set_bool(conf, "sram_dir_enable", true);
-   else
-      config_set_bool(conf, "sram_dir_enable", false);
-
-   if (g_extern.lifecycle_mode_state & (1ULL << MODE_LOAD_GAME_STATE_DIR_ENABLE))
-      config_set_bool(conf, "savestate_dir_enable", true);
-   else
-      config_set_bool(conf, "savestate_dir_enable", false);
 
    for (unsigned i = 0; i < MAX_PLAYERS; i++)
    {

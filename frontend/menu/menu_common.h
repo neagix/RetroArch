@@ -101,6 +101,7 @@ typedef enum
 
    // Shader stuff
    RGUI_SETTINGS_VIDEO_OPTIONS,
+   RGUI_SETTINGS_VIDEO_OPTIONS_FIRST,
 #ifdef GEKKO
    RGUI_SETTINGS_VIDEO_RESOLUTION,
 #endif
@@ -115,6 +116,7 @@ typedef enum
    RGUI_SETTINGS_VIDEO_ROTATION,
    RGUI_SETTINGS_VIDEO_VSYNC,
    RGUI_SETTINGS_VIDEO_HARD_SYNC,
+   RGUI_SETTINGS_VIDEO_OPTIONS_LAST,
 #ifdef HAVE_SHADER_MANAGER
    RGUI_SETTINGS_SHADER_OPTIONS,
    RGUI_SETTINGS_SHADER_FILTER,
@@ -124,11 +126,7 @@ typedef enum
    RGUI_SETTINGS_SHADER_0,
    RGUI_SETTINGS_SHADER_0_FILTER,
    RGUI_SETTINGS_SHADER_0_SCALE,
-#endif
-#ifdef HAVE_SHADER_MANAGER
    RGUI_SETTINGS_SHADER_LAST = RGUI_SETTINGS_SHADER_0_SCALE + (3 * (RGUI_MAX_SHADERS - 1)),
-#else
-   RGUI_SETTINGS_SHADER_LAST = RGUI_SETTINGS_VIDEO_HARD_SYNC,
 #endif
 
    // settings options are done here too
@@ -139,6 +137,7 @@ typedef enum
    RGUI_SETTINGS_AUDIO_OPTIONS,
    RGUI_SETTINGS_INPUT_OPTIONS,
    RGUI_SETTINGS_PATH_OPTIONS,
+   RGUI_SETTINGS_OPTIONS,
    RGUI_SETTINGS_REWIND_ENABLE,
    RGUI_SETTINGS_REWIND_GRANULARITY,
    RGUI_SETTINGS_SRAM_AUTOSAVE,
@@ -160,8 +159,6 @@ typedef enum
    RGUI_SETTINGS_AUDIO_MUTE,
    RGUI_SETTINGS_AUDIO_CONTROL_RATE_DELTA,
    RGUI_SETTINGS_ZIP_EXTRACT,
-   RGUI_SETTINGS_SRAM_DIR,
-   RGUI_SETTINGS_STATE_DIR,
    RGUI_SETTINGS_DEBUG_TEXT,
    RGUI_SETTINGS_RESTART_EMULATOR,
    RGUI_SETTINGS_RESUME_GAME,
@@ -192,8 +189,6 @@ typedef enum
    RGUI_SETTINGS_CORE_OPTION_NONE = 0xffff,
    RGUI_SETTINGS_CORE_OPTION_START = 0x10000
 } rgui_file_type_t;
-
-#define RGUI_SETTINGS_VIDEO_OPTIONS_FIRST (RGUI_SETTINGS_VIDEO_OPTIONS + 1)
 
 typedef enum
 {
@@ -247,6 +242,7 @@ typedef struct
 
 #ifdef HAVE_OSKUTIL
    unsigned osk_param;
+   oskutil_params oskutil_handle;
    bool (*osk_init)(void *data);
    bool (*osk_callback)(void *data);
 #endif
@@ -282,7 +278,7 @@ void shader_manager_get_str(struct gfx_shader *shader,
       char *type_str, size_t type_str_size, unsigned type);
 #endif
 
-void menu_ticker_line(char *buf, size_t len, unsigned tick, const char *str);
+void menu_ticker_line(char *buf, size_t len, unsigned tick, const char *str, bool selected);
 
 void load_menu_game_prepare(void);
 bool load_menu_game(void);

@@ -561,7 +561,7 @@ void menu_free(void)
    free(rgui);
 }
 
-void menu_ticker_line(char *buf, size_t len, unsigned index, const char *str)
+void menu_ticker_line(char *buf, size_t len, unsigned index, const char *str, bool selected)
 {
    size_t str_len = strlen(str);
    if (str_len <= len)
@@ -570,27 +570,34 @@ void menu_ticker_line(char *buf, size_t len, unsigned index, const char *str)
       return;
    }
 
-   // Wrap long strings in options with some kind of ticker line.
-   unsigned ticker_period = 2 * (str_len - len) + 4;
-   unsigned phase = index % ticker_period;
-
-   unsigned phase_left_stop = 2;
-   unsigned phase_left_moving = phase_left_stop + (str_len - len);
-   unsigned phase_right_stop = phase_left_moving + 2;
-
-   unsigned left_offset = phase - phase_left_stop;
-   unsigned right_offset = (str_len - len) - (phase - phase_right_stop);
-
-   // Ticker period: [Wait at left (2 ticks), Progress to right (type_len - w), Wait at right (2 ticks), Progress to left].
-   if (phase < phase_left_stop)
-      strlcpy(buf, str, len + 1);
-   else if (phase < phase_left_moving)
-      strlcpy(buf, str + left_offset, len + 1);
-   else if (phase < phase_right_stop)
-      strlcpy(buf, str + str_len - len, len + 1);
+   if (!selected)
+   {
+      strlcpy(buf, str, len + 1 - 3);
+      strlcat(buf, "...", len + 1);
+   }
    else
-      strlcpy(buf, str + right_offset, len + 1);
+   {
+      // Wrap long strings in options with some kind of ticker line.
+      unsigned ticker_period = 2 * (str_len - len) + 4;
+      unsigned phase = index % ticker_period;
 
+      unsigned phase_left_stop = 2;
+      unsigned phase_left_moving = phase_left_stop + (str_len - len);
+      unsigned phase_right_stop = phase_left_moving + 2;
+
+      unsigned left_offset = phase - phase_left_stop;
+      unsigned right_offset = (str_len - len) - (phase - phase_right_stop);
+
+      // Ticker period: [Wait at left (2 ticks), Progress to right (type_len - w), Wait at right (2 ticks), Progress to left].
+      if (phase < phase_left_stop)
+         strlcpy(buf, str, len + 1);
+      else if (phase < phase_left_moving)
+         strlcpy(buf, str + left_offset, len + 1);
+      else if (phase < phase_right_stop)
+         strlcpy(buf, str + str_len - len, len + 1);
+      else
+         strlcpy(buf, str + right_offset, len + 1);
+   }
 }
 
 #ifndef HAVE_RMENU_XUI
@@ -604,9 +611,7 @@ bool menu_iterate(void)
 
    if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_PREINIT))
    {
-      if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME))
-         rgui->need_refresh = true;
-
+      rgui->need_refresh = true;
       g_extern.lifecycle_mode_state &= ~(1ULL << MODE_MENU_PREINIT);
       rgui->old_input_state |= 1ULL << DEVICE_NAV_MENU;
    }
@@ -666,11 +671,6 @@ bool menu_iterate(void)
    return true;
 
 deinit:
-#ifdef HAVE_RGUI
-   /* TODO - see if we can remove this */
-   g_extern.lifecycle_mode_state &= ~(1ULL << MODE_MENU_INGAME);
-#endif
-
    return false;
 }
 #endif

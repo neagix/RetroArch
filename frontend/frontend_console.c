@@ -22,8 +22,6 @@
 #include "../config.def.h"
 #include "menu/rmenu.h"
 
-char input_path[1024];
-
 #if defined(__CELLOS_LV2__)
 #include "platform/platform_ps3_exec.c"
 #include "platform/platform_ps3.c"
@@ -78,6 +76,19 @@ static bool libretro_install_core(const char *path_prefix,
    return true;
 }
 
+#define MAKE_DIR(x, name) { \
+   RARCH_LOG("Checking directory name %s [%s]\n", name, x); \
+   if (strlen(x) > 0) \
+   if (!path_is_directory((x)) )\
+   { \
+      RARCH_WARN("Directory \"%s\" does not exists, creating\n", (x)); \
+      if (mkdir((x), 0777) != 0) \
+      { \
+         RARCH_ERR("Could not create directory \"%s\"\n", (x)); \
+      } \
+   } \
+}
+
 int rarch_main(int argc, char *argv[])
 {
    system_init();
@@ -94,6 +105,13 @@ int rarch_main(int argc, char *argv[])
    g_extern.verbose = true;
 
    get_environment_settings(argc, argv);
+
+   MAKE_DIR(default_paths.port_dir, "port_dir");
+   MAKE_DIR(default_paths.system_dir, "system_dir");
+   MAKE_DIR(default_paths.savestate_dir, "savestate_dir");
+   MAKE_DIR(default_paths.sram_dir, "sram_dir");
+   MAKE_DIR(default_paths.input_presets_dir, "input_presets_dir");
+
    config_load();
 
    /* FIXME - when dummy loading becomes possible perhaps change this param  */
@@ -118,7 +136,11 @@ int rarch_main(int argc, char *argv[])
    // Save new libretro core path to config file and exit
    if (path_file_exists(core_exe_path))
       if (libretro_install_core(path_prefix, core_exe_path))
+#ifdef _XBOX
+    g_extern.system.shutdown = g_extern.system.shutdown;
+#else
 	 g_extern.system.shutdown = true;
+#endif
 #endif
 
 #ifdef GEKKO
@@ -126,8 +148,8 @@ int rarch_main(int argc, char *argv[])
    char core_name[64];
 
    libretro_get_current_core_pathname(core_name, sizeof(core_name));
-   snprintf(input_path, sizeof(input_path), "%s/%s.cfg", default_paths.input_presets_dir, core_name);
-   config_read_keybinds(input_path);
+   snprintf(g_extern.input_config_path, sizeof(g_extern.input_config_path), "%s/%s.cfg", default_paths.input_presets_dir, core_name);
+   config_read_keybinds(g_extern.input_config_path);
 #endif
 
    menu_init();
@@ -192,7 +214,7 @@ int rarch_main(int argc, char *argv[])
 
 #ifdef GEKKO
    /* Per-core input config saving */
-   config_save_keybinds(input_path);
+   config_save_keybinds(g_extern.input_config_path);
 #endif
 
    if (g_extern.main_is_init)
