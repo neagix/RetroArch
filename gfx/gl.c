@@ -383,6 +383,14 @@ void gl_shader_set_coords(void *data, const struct gl_coords *coords, const math
 #define gl_shader_num(gl) ((gl->shader) ? gl->shader->num_shaders() : 0)
 #define gl_shader_filter_type(gl, index, smooth) ((gl->shader) ? gl->shader->filter_type(index, smooth) : false)
 
+#ifdef IOS
+// There is no default frame buffer on IOS.
+void ios_bind_game_view_fbo(void);
+#define gl_bind_backbuffer() ios_bind_game_view_fbo()
+#else
+#define gl_bind_backbuffer() pglBindFramebuffer(GL_FRAMEBUFFER, 0)
+#endif
+
 #ifdef HAVE_FBO
 static void gl_shader_scale(void *data, unsigned index, struct gfx_fbo_scale *scale)
 {
@@ -658,7 +666,7 @@ bool gl_init_hw_render(gl_t *gl, unsigned width, unsigned height)
    glBindTexture(GL_TEXTURE_2D, 0);
    pglGenFramebuffers(TEXTURES, gl->hw_render_fbo);
 
-   bool depth   = g_extern.system.hw_render_callback.depth;
+   bool depth = g_extern.system.hw_render_callback.depth;
 
    if (depth)
    {
@@ -688,7 +696,7 @@ bool gl_init_hw_render(gl_t *gl, unsigned width, unsigned height)
       }
    }
 
-   pglBindFramebuffer(GL_FRAMEBUFFER, 0);
+   gl_bind_backbuffer();
    pglBindRenderbuffer(GL_RENDERBUFFER, 0);
    gl->hw_render_fbo_init = true;
    return true;
@@ -930,13 +938,7 @@ static void gl_frame_fbo(void *data, const struct gl_tex_info *tex_info)
    set_texture_coords(fbo_tex_coords, xamt, yamt);
 
    // Render our FBO texture to back buffer.
-#ifdef IOS
-   // There is no default frame buffer on IOS.
-   extern void ios_bind_game_view_fbo();
-   ios_bind_game_view_fbo();
-#else
-   pglBindFramebuffer(GL_FRAMEBUFFER, 0);
-#endif
+   gl_bind_backbuffer();
    if (gl->shader)
       gl->shader->use(gl->fbo_pass + 1);
 
@@ -1253,6 +1255,7 @@ static void gl_pbo_async_readback(void *data)
    // Read asynchronously into PBO buffer.
    RARCH_PERFORMANCE_INIT(async_readback);
    RARCH_PERFORMANCE_START(async_readback);
+   glReadBuffer(GL_BACK);
    glReadPixels(gl->vp.x, gl->vp.y,
          gl->vp.width, gl->vp.height,
          GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
@@ -1352,7 +1355,7 @@ static bool gl_frame(void *data, const void *frame, unsigned width, unsigned hei
 
          if (!gl->fbo_inited)
          {
-            pglBindFramebuffer(GL_FRAMEBUFFER, 0);
+            gl_bind_backbuffer();
             gl_set_viewport(gl, gl->win_width, gl->win_height, false, true);
          }
       }
@@ -1463,6 +1466,11 @@ static bool gl_frame(void *data, const void *frame, unsigned width, unsigned hei
    }
 #endif
 
+#if !defined(HAVE_OPENGLES) && defined(HAVE_FFMPEG)
+   if (gl->pbo_readback_enable)
+      gl_pbo_async_readback(gl);
+#endif
+
    context_swap_buffers_func();
    g_extern.frame_count++;
 
@@ -1477,11 +1485,6 @@ static bool gl_frame(void *data, const void *frame, unsigned width, unsigned hei
       pglDeleteSync(sync);
       RARCH_PERFORMANCE_STOP(gl_fence);
    }
-#endif
-
-#if !defined(HAVE_OPENGLES) && defined(HAVE_FFMPEG)
-   if (gl->pbo_readback_enable)
-      gl_pbo_async_readback(gl);
 #endif
 
    return true;
@@ -1666,10 +1669,10 @@ static inline void gl_reinit_textures(void *data, const video_info_t *video)
       RARCH_ERR("GL error reported while reinitializing textures. This should not happen ...\n");
 }
 
+#if !defined(HAVE_OPENGLES) && defined(HAVE_FFMPEG)
 static void gl_init_pbo_readback(void *data)
 {
    gl_t *gl = (gl_t*)data;
-#if !defined(HAVE_OPENGLES) && defined(HAVE_FFMPEG)
    // Only bother with this if we're doing FFmpeg GPU recording.
    gl->pbo_readback_enable = g_settings.video.gpu_record && g_extern.recording;
    if (!gl->pbo_readback_enable)
@@ -1682,7 +1685,7 @@ static void gl_init_pbo_readback(void *data)
    {
       pglBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbo_readback[i]);
       pglBufferData(GL_PIXEL_PACK_BUFFER, gl->vp.width * gl->vp.height * sizeof(uint32_t),
-            NULL, GL_STREAM_READ);
+            NULL, GL_STREAM_COPY);
    }
    pglBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
@@ -1703,11 +1706,8 @@ static void gl_init_pbo_readback(void *data)
       RARCH_ERR("Failed to init pixel conversion for PBO.\n");
       pglDeleteBuffers(4, gl->pbo_readback);
    }
-
-#else
-   (void)gl;
-#endif
 }
+#endif
 
 static const gfx_ctx_driver_t *gl_get_context(void)
 {
@@ -1910,7 +1910,9 @@ static void *gl_init(const video_info_t *video, const input_driver_t **input, vo
       gl->font_ctx = gl_font_init_first(gl, g_settings.video.font_path, g_settings.video.font_size);
 #endif
 
+#if !defined(HAVE_OPENGLES) && defined(HAVE_FFMPEG)
    gl_init_pbo_readback(gl);
+#endif
 
    if (!gl_check_error())
    {
@@ -2056,6 +2058,7 @@ static bool gl_read_viewport(void *data, uint8_t *buffer)
 
 #ifdef HAVE_OPENGLES
    glPixelStorei(GL_PACK_ALIGNMENT, get_alignment(gl->vp.width * 3));
+   // GLES doesn't support glReadBuffer ... Take a chance that it'll work out right.
    glReadPixels(gl->vp.x, gl->vp.y,
          gl->vp.width, gl->vp.height,
          GL_RGB, GL_UNSIGNED_BYTE, buffer);
@@ -2094,6 +2097,7 @@ static bool gl_read_viewport(void *data, uint8_t *buffer)
       glPixelStorei(GL_PACK_ROW_LENGTH, gl->vp.width);
       glPixelStorei(GL_PACK_ALIGNMENT, get_alignment(gl->vp.width * 3));
 
+      glReadBuffer(GL_FRONT);
       glReadPixels(gl->vp.x, gl->vp.y,
             gl->vp.width, gl->vp.height,
             GL_BGR, GL_UNSIGNED_BYTE, buffer);

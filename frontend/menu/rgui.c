@@ -105,7 +105,9 @@ unsigned RGUI_WIDTH = 320;
 unsigned RGUI_HEIGHT = 240;
 uint16_t menu_framebuf[400 * 240];
 
+#ifdef HAVE_SHADER_MANAGER
 static int shader_manager_toggle_setting(rgui_handle_t *rgui, unsigned setting, rgui_action_t action);
+#endif
 static int video_option_toggle_setting(rgui_handle_t *rgui, unsigned setting, rgui_action_t action);
 
 static const unsigned rgui_controller_lut[] = {
@@ -1200,6 +1202,11 @@ static void rgui_settings_disc_options_populate_entries(rgui_handle_t *rgui)
 static void rgui_settings_options_populate_entries(rgui_handle_t *rgui)
 {
    rgui_list_clear(rgui->selection_buf);
+   rgui_list_push(rgui->selection_buf, "Rewind", RGUI_SETTINGS_REWIND_ENABLE, 0);
+   rgui_list_push(rgui->selection_buf, "Rewind Granularity", RGUI_SETTINGS_REWIND_GRANULARITY, 0);
+#if defined(HAVE_THREADS) && !defined(RARCH_CONSOLE)
+   rgui_list_push(rgui->selection_buf, "SRAM Autosave", RGUI_SETTINGS_SRAM_AUTOSAVE, 0);
+#endif
    rgui_list_push(rgui->selection_buf, "Debug Info Messages", RGUI_SETTINGS_DEBUG_TEXT, 0);
 }
 
@@ -1233,11 +1240,6 @@ static void rgui_settings_populate_entries(rgui_handle_t *rgui)
       rgui_list_push(rgui->selection_buf, "Restart Game", RGUI_SETTINGS_RESTART_GAME, 0);
 
    }
-   rgui_list_push(rgui->selection_buf, "Rewind", RGUI_SETTINGS_REWIND_ENABLE, 0);
-   rgui_list_push(rgui->selection_buf, "Rewind Granularity", RGUI_SETTINGS_REWIND_GRANULARITY, 0);
-#if defined(HAVE_THREADS) && !defined(RARCH_CONSOLE)
-   rgui_list_push(rgui->selection_buf, "SRAM Autosave", RGUI_SETTINGS_SRAM_AUTOSAVE, 0);
-#endif
 #ifndef HAVE_DYNAMIC
    rgui_list_push(rgui->selection_buf, "Restart RetroArch", RGUI_SETTINGS_RESTART_EMULATOR, 0);
 #endif
@@ -2567,14 +2569,18 @@ uint64_t rgui_input(void)
    input_state |= input_key_pressed_func(RARCH_MENU_TOGGLE) ? (1ULL << DEVICE_NAV_MENU) : 0;
 #endif
 
+
    rgui->trigger_state = input_state & ~rgui->old_input_state;
 
+   // FIXME: Allowing a held-down scroll is desired for left/right in filebrowser,
+   // but seems weird to allow in setting options.
+   // Logic here should take this into account.
    rgui->do_held = (input_state & (
          (1ULL << DEVICE_NAV_UP) |
          (1ULL << DEVICE_NAV_DOWN) |
-         (1ULL << DEVICE_NAV_LEFT) |
+         (1ULL << DEVICE_NAV_LEFT) | 
          (1ULL << DEVICE_NAV_RIGHT))) &&
-      !(input_state & DEVICE_NAV_MENU);
+      !(input_state & (1ULL << DEVICE_NAV_MENU));
 
    return input_state;
 }

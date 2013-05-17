@@ -236,10 +236,10 @@ static void get_environment_settings(int argc, char *argv[])
 #elif defined(_XBOX360)
    strlcpy(default_paths.core_dir, "game:", sizeof(default_paths.core_dir));
    strlcpy(default_paths.filesystem_root_dir, "game:\\", sizeof(default_paths.filesystem_root_dir));
-   strlcpy(g_settings.screenshot_directory, "game:", sizeof(g_settings.screenshot_directory));
 #ifdef IS_SALAMANDER
    strlcpy(default_paths.config_path, "game:\\retroarch.cfg", sizeof(default_paths.config_path));
 #else
+   strlcpy(g_settings.screenshot_directory, "game:", sizeof(g_settings.screenshot_directory));
    strlcpy(g_extern.config_path, "game:\\retroarch.cfg", sizeof(g_extern.config_path));
 #endif
    strlcpy(default_paths.savestate_dir, "game:\\savestates", sizeof(default_paths.savestate_dir));
@@ -267,7 +267,7 @@ static int system_process_args(int argc, char *argv[])
    (void)argc;
    (void)argv;
 
-#ifdef _XBOX1
+#if defined(_XBOX1)
    LAUNCH_DATA ptr;
    DWORD launch_type;
 
@@ -281,6 +281,19 @@ static int system_process_args(int argc, char *argv[])
          RARCH_LOG("Auto-start game %s.\n", g_extern.fullpath);
          return 1;
       }
+   }
+#elif defined(_XBOX360)
+   DWORD dwLaunchDataSize;
+   if (XGetLaunchDataSize(&dwLaunchDataSize) == ERROR_SUCCESS)
+   {
+      BYTE* pLaunchData = new BYTE[dwLaunchDataSize];
+      XGetLaunchData(pLaunchData, dwLaunchDataSize);
+
+      snprintf(g_extern.fullpath, sizeof(g_extern.fullpath), "%s", (char*)pLaunchData);
+      RARCH_LOG("Auto-start game %s.\n", g_extern.fullpath);
+
+      delete []pLaunchData;
+      return 1;
    }
 #endif
    return 0;

@@ -40,6 +40,8 @@
 #define GSEVENT_MOD_ALT (1 << 19)
 #define GSEVENT_MOD_CTRL (1 << 20)
 
+//#define HAVE_DEBUG_FILELOG
+
 static ios_input_data_t g_input_data;
 
 static bool enable_btstack;
@@ -142,9 +144,16 @@ static void handle_icade_event(unsigned keycode)
 
 int main(int argc, char *argv[])
 {
-    @autoreleasepool {
-        return UIApplicationMain(argc, argv, NSStringFromClass([RApplication class]), NSStringFromClass([RetroArch_iOS class]));
-    }
+   @autoreleasepool {
+#if defined(HAVE_DEBUG_FILELOG) && (TARGET_IPHONE_SIMULATOR == 0)
+      NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+      NSString *documentsDirectory = [paths objectAtIndex:0];
+      NSString *logPath = [documentsDirectory stringByAppendingPathComponent:@"console_stdout.log"];
+      freopen([logPath cStringUsingEncoding:NSASCIIStringEncoding], "a", stdout);
+      freopen([logPath cStringUsingEncoding:NSASCIIStringEncoding], "a", stderr);
+#endif
+      return UIApplicationMain(argc, argv, NSStringFromClass([RApplication class]), NSStringFromClass([RetroArch_iOS class]));
+   }
 }
 
 #define kDOCSFOLDER [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"]

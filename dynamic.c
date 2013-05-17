@@ -290,6 +290,10 @@ static void load_symbols(bool is_dummy)
          strlcpy(g_settings.libretro, libretro_core_buffer, sizeof(g_settings.libretro));
       }
 
+      // Need to use absolute path for this setting. It can be saved to ROM history,
+      // and a relative path would break in that scenario.
+      path_resolve_realpath(g_settings.libretro, sizeof(g_settings.libretro));
+
       RARCH_LOG("Loading dynamic libretro from: \"%s\"\n", g_settings.libretro);
       lib_handle = dylib_load(g_settings.libretro);
       if (!lib_handle)
@@ -510,7 +514,15 @@ static bool environment_cb(unsigned cmd, void *data)
          }
 
          const struct retro_variable *vars = (const struct retro_variable*)data;
-         g_extern.system.core_options = core_option_new(g_settings.core_options_path, vars);
+
+         const char *options_path = g_settings.core_options_path;
+         char buf[PATH_MAX];
+         if (!*options_path && *g_extern.config_path)
+         {
+            fill_pathname_resolve_relative(buf, g_extern.config_path, ".retroarch-core-options.cfg", sizeof(buf));
+            options_path = buf;
+         }
+         g_extern.system.core_options = core_option_new(options_path, vars);
 
          break;
       }

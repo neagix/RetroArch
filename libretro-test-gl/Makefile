@@ -12,19 +12,39 @@ else ifneq ($(findstring win,$(shell uname -a)),)
 endif
 endif
 
+TARGET_NAME = testgl
+
 ifeq ($(platform), unix)
-   TARGET := libretro.so
+   TARGET := $(TARGET_NAME)_libretro.so
    fpic := -fPIC
    SHARED := -shared -Wl,--version-script=link.T -Wl,--no-undefined
    GL_LIB := -lGL
 else ifeq ($(platform), osx)
-   TARGET := libretro.dylib
+   TARGET := $(TARGET_NAME)_libretro.dylib
    fpic := -fPIC
    SHARED := -dynamiclib
    GL_LIB := -framework OpenGL
+else ifeq ($(platform), ios)
+   TARGET := $(TARGET_NAME)_libretro_ios.dylib
+   fpic := -fPIC
+   SHARED := -dynamiclib
+   GL_LIB := -framework OpenGLES
+	DEFINES := -DIOS
+	CFLAGS += -DGLES $(DEFINES)
+	CC = clang -arch armv7 -isysroot $(IOSSDK)
+else ifeq ($(platform), qnx)
+   TARGET := $(TARGET_NAME)_libretro_qnx.so
+   fpic := -fPIC
+   SHARED := -shared -Wl,--version-script=link.T
+   GL_LIB := -lGL
+
+   CC = qcc -Vgcc_ntoarmv7le
+   AR = qcc -Vgcc_ntoarmv7le
+   CFLAGS += -D__BLACKBERRY_QNX__ -DGLES
+	GL_LIB := -lGLESv2
 else
    CC = gcc
-   TARGET := retro.dll
+   TARGET := $(TARGET_NAME)_retro.dll
    SHARED := -shared -static-libgcc -static-libstdc++ -s -Wl,--version-script=link.T -Wl,--no-undefined
    GL_LIB := -lopengl32
    CFLAGS += -I..
@@ -36,8 +56,14 @@ else
    CFLAGS += -O3
 endif
 
+ifeq ($(platform), qnx)
+CFLAGS += -Wc,-std=gnu99
+else
+CFLAGS += -std=gnu99
+endif
+
 OBJECTS := libretro-test.o
-CFLAGS += -std=gnu99 -Wall -pedantic $(fpic)
+CFLAGS += -Wall -pedantic $(fpic)
 
 ifeq ($(GLES), 1)
    CFLAGS += -DGLES

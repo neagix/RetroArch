@@ -92,6 +92,36 @@ void matrix_ortho(math_matrix *mat,
    MAT_ELEM(*mat, 2, 3) = tz;
 }
 
+void matrix_scale(math_matrix *out, float x, float y,
+      float z)
+{
+   memset(out, 0, sizeof(*out));
+   MAT_ELEM(*out, 0, 0) = x;
+   MAT_ELEM(*out, 1, 1) = y;
+   MAT_ELEM(*out, 2, 2) = z;
+   MAT_ELEM(*out, 3, 3) = 1.0f;
+}
+
+void matrix_translate(math_matrix *out, float x,
+      float y, float z)
+{
+   matrix_identity(out);
+   MAT_ELEM(*out, 0, 3) = x;
+   MAT_ELEM(*out, 1, 3) = y;
+   MAT_ELEM(*out, 2, 3) = z;
+}
+
+void matrix_projection(math_matrix *out, float znear,
+      float zfar)
+{
+   memset(out, 0, sizeof(*out));
+   MAT_ELEM(*out, 0, 0) = znear;
+   MAT_ELEM(*out, 1, 1) = zfar;
+   MAT_ELEM(*out, 2, 2) = (zfar + znear) / (zfar - znear);
+   MAT_ELEM(*out, 2, 3) = -2.0f * zfar * znear / (zfar - znear);
+   MAT_ELEM(*out, 3, 2) = -1.0f;
+}
+
 void matrix_multiply(math_matrix *out,
       const math_matrix *a, const math_matrix *b)
 {

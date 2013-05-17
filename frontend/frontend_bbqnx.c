@@ -28,21 +28,29 @@ int rarch_main(int argc, char *argv[])
    //Initialize bps
 #ifndef HAVE_BB10
    bps_initialize();
-
    rarch_main_clear_state();
-
    strlcpy(g_settings.libretro, "app/native/lib", sizeof(g_settings.libretro));
-   strlcpy(g_extern.fullpath, "--menu", sizeof(g_extern.fullpath));
 #endif
-
    strlcpy(g_extern.config_path, "app/native/retroarch.cfg", sizeof(g_extern.config_path));
 
    config_load();
 
+   if (g_settings.input.overlay[0] == '\0')
+   {
+      RARCH_LOG("Setting default overlay %s ...\n", "app/native/overlays/snes-landscape.cfg");
+      strlcpy(g_settings.input.overlay, "app/native/overlays/snes-landscape.cfg", sizeof(g_settings.input.overlay));
+   }
+
    g_extern.verbose = true;
 
    menu_init();
+
    g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME);
+
+#ifdef HAVE_BB10
+   if (!g_extern.libretro_dummy)
+      menu_rom_history_push_current();
+#endif
 
    for (;;)
    {
@@ -57,7 +65,7 @@ int rarch_main(int argc, char *argv[])
             g_extern.lifecycle_mode_state |= (1ULL << MODE_GAME);
          else
          {
-#ifdef RARCH_CONSOLE
+#if defined(RARCH_CONSOLE) || defined(__BLACKBERRY_QNX__)
             g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU);
 #else
             return 1;
@@ -84,6 +92,9 @@ int rarch_main(int argc, char *argv[])
    g_extern.system.shutdown = false;
 
    menu_free();
+
+   config_save_file(g_extern.config_path);
+
    if (g_extern.main_is_init)
       rarch_main_deinit();
 
