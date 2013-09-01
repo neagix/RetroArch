@@ -110,8 +110,7 @@ static void gfx_ctx_set_resize(unsigned width, unsigned height)
 static void gfx_ctx_update_window_title(void)
 {
    char buf[128];
-   if (gfx_get_fps(buf, sizeof(buf), false))
-      RARCH_LOG("%s.\n", buf);
+   gfx_get_fps(buf, sizeof(buf), false);
 }
 
 static void gfx_ctx_get_video_size(unsigned *width, unsigned *height)
@@ -244,8 +243,10 @@ static bool gfx_ctx_set_video_mode(
    return true;
 }
 
-static bool gfx_ctx_bind_api(enum gfx_ctx_api api)
+static bool gfx_ctx_bind_api(enum gfx_ctx_api api, unsigned major, unsigned minor)
 {
+   (void)major;
+   (void)minor;
    g_api = api;
    switch (api)
    {
@@ -283,7 +284,7 @@ static void gfx_ctx_destroy(void)
 
       if (g_egl_ctx)
       {
-         gfx_ctx_bind_api(g_api);
+         gfx_ctx_bind_api(g_api, 0, 0);
          eglMakeCurrent(g_egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
          eglDestroyContext(g_egl_dpy, g_egl_ctx);
       }
@@ -297,7 +298,7 @@ static void gfx_ctx_destroy(void)
 
       if (g_egl_surf)
       {
-         gfx_ctx_bind_api(g_api);
+         gfx_ctx_bind_api(g_api, 0, 0);
          eglDestroySurface(g_egl_dpy, g_egl_surf);
       }
 
@@ -309,7 +310,7 @@ static void gfx_ctx_destroy(void)
 
       eglBindAPI(EGL_OPENVG_API);
       eglMakeCurrent(g_egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-      gfx_ctx_bind_api(g_api);
+      gfx_ctx_bind_api(g_api, 0, 0);
       eglMakeCurrent(g_egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
       eglTerminate(g_egl_dpy);
    }
@@ -404,7 +405,7 @@ static bool gfx_ctx_init_egl_image_buffer(const video_info_t *video)
       goto fail;
    }
 
-   gfx_ctx_bind_api(g_api);
+   gfx_ctx_bind_api(g_api, 0, 0);
    eglMakeCurrent(g_egl_dpy, g_egl_surf, g_egl_surf, g_egl_ctx);
 
    g_smooth = video->smooth;
@@ -423,7 +424,7 @@ fail:
       g_pbuff_surf = EGL_NO_CONTEXT;
    }
 
-   gfx_ctx_bind_api(g_api);
+   gfx_ctx_bind_api(g_api, 0, 0);
    eglMakeCurrent(g_egl_dpy, g_egl_surf, g_egl_surf, g_egl_ctx);
 
    return false;
@@ -452,7 +453,7 @@ static bool gfx_ctx_write_egl_image(const void *frame, unsigned width, unsigned 
    vgImageSubData(g_egl_vgimage[index], frame, pitch, (rgb32 ? VG_sXRGB_8888 : VG_sRGB_565), 0, 0, width, height);
    *image_handle = eglBuffer[index];
 
-   gfx_ctx_bind_api(g_api);
+   gfx_ctx_bind_api(g_api, 0, 0);
    eglMakeCurrent(g_egl_dpy, g_egl_surf, g_egl_surf, g_egl_ctx);
 
    return ret;

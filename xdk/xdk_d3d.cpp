@@ -877,8 +877,8 @@ static bool xdk_d3d_frame(void *data, const void *frame,
    if (d3d->should_resize)
    {
 #ifdef _XBOX1
-      D3DDevice_SetFlickerFilter(g_extern.console.screen.flicker_filter_index);
-      D3DDevice_SetSoftDisplayFilter(g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE));
+      d3dr->SetFlickerFilter(g_extern.console.screen.flicker_filter_index);
+      d3dr->SetSoftDisplayFilter(g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE));
 #endif
       xdk_d3d_set_viewport(false);
       d3d->should_resize = false;
@@ -994,49 +994,23 @@ NULL, NULL, NULL, 0);
 #endif
 
 #if defined(_XBOX1)
-   float mem_width  = font_x + 30;
-   float mem_height = font_y + 50;
    float msg_width  = 60;
    float msg_height = 365;
 #elif defined(_XBOX360)
-   float mem_width  = (lifecycle_mode_state & (1ULL << MODE_MENU_HD)) ? 160 : 100;
-   float mem_height = 70;
-   float msg_width  = mem_width;
-   float msg_height = mem_height + 50;
+   float msg_width  = (lifecycle_mode_state & (1ULL << MODE_MENU_HD)) ? 160 : 100;
+   float msg_height = 120;
 #endif
 
-   font_params_t font_parms = {0};
-
-   if (lifecycle_mode_state & (1ULL << MODE_FPS_DRAW))
-   {
-      MEMORYSTATUS stat;
-      char buf[128];
-
-      GlobalMemoryStatus(&stat);
-
-      font_parms.x = mem_width;
-      font_parms.y = mem_height;
-      font_parms.scale = 0;
-      font_parms.color = 0;
-
-      snprintf(buf, sizeof(buf), "%.2f MB free / %.2f MB total", stat.dwAvailPhys/(1024.0f*1024.0f), stat.dwTotalPhys/(1024.0f*1024.0f));
-      if (d3d->font_ctx)
-         d3d->font_ctx->render_msg(d3d, buf, &font_parms);
-
-      gfx_get_fps(buf, sizeof(buf), true);
-      if (d3d->font_ctx)
-      {
-         font_parms.y = mem_height + 30;
-         d3d->font_ctx->render_msg(d3d, buf, &font_parms);
-      }
-   }
-
+#if 0
    if (msg)
    {
       font_parms.x = msg_width;
       font_parms.y = msg_height;
       d3d->font_ctx->render_msg(d3d, msg, &font_parms);
    }
+#endif
+
+   d3d->ctx_driver->update_window_title();
 
    gfx_ctx_xdk_swap_buffers();
 

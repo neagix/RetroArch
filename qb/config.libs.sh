@@ -34,9 +34,39 @@ if [ "$HAVE_VIDEOCORE" = 'yes' ]; then
 fi
 
 if [ "$HAVE_NEON" = "yes" ]; then
-   CFLAGS="$CFLAGS -mfpu=neon -mfloat-abi=hard"
-   CXXFLAGS="$CXXFLAGS -mfpu=neon -mfloat-abi=hard"
-   ASFLAGS="$ASFLAGS -mfpu=neon -mfloat-abi=hard"
+   CFLAGS="$CFLAGS -mfpu=neon -marm"
+   CXXFLAGS="$CXXFLAGS -mfpu=neon -marm"
+   ASFLAGS="$ASFLAGS -mfpu=neon"
+fi
+
+if [ "$HAVE_FLOATHARD" = "yes" ]; then
+   CFLAGS="$CFLAGS -mfloat-abi=hard"
+   CXXFLAGS="$CXXFLAGS -mfloat-abi=hard"
+   ASFLAGS="$ASFLAGS -mfloat-abi=hard"
+fi
+
+if [ "$HAVE_FLOATSOFTFP" = "yes" ]; then
+   CFLAGS="$CFLAGS -mfloat-abi=softfp"
+   CXXFLAGS="$CXXFLAGS -mfloat-abi=softfp"
+   ASFLAGS="$ASFLAGS -mfloat-abi=softfp"
+fi
+
+if [ "$HAVE_NEON" = "yes" ]; then
+   CFLAGS="$CFLAGS -mfpu=neon -marm"
+   CXXFLAGS="$CXXFLAGS -mfpu=neon -marm"
+   ASFLAGS="$ASFLAGS -mfpu=neon"
+fi
+
+if [ "$HAVE_FLOATHARD" = "yes" ]; then
+   CFLAGS="$CFLAGS -mfloat-abi=hard"
+   CXXFLAGS="$CXXFLAGS -mfloat-abi=hard"
+   ASFLAGS="$ASFLAGS -mfloat-abi=hard"
+fi
+
+if [ "$HAVE_FLOATSOFTFP" = "yes" ]; then
+   CFLAGS="$CFLAGS -mfloat-abi=softfp"
+   CXXFLAGS="$CXXFLAGS -mfloat-abi=softfp"
+   ASFLAGS="$ASFLAGS -mfloat-abi=softfp"
 fi
 
 if [ "$HAVE_SSE" = "yes" ]; then
@@ -109,14 +139,9 @@ check_lib OSS_LIB -lossaudio
 
 if [ "$OS" = 'Darwin' ]; then
    check_lib AL "-framework OpenAL" alcOpenDevice
+   HAVE_SDL=no
 else
    check_lib AL -lopenal alcOpenDevice
-fi
-
-if [ "$OS" = 'Darwin' ]; then
-   check_lib FBO "-framework OpenGL" glFramebufferTexture2D
-else
-   check_lib FBO -lGL glFramebufferTexture2D
 fi
 
 check_pkgconf RSOUND rsound 1.1
@@ -128,7 +153,7 @@ check_lib COREAUDIO "-framework AudioUnit" AudioUnitInitialize
 
 check_pkgconf SDL sdl 1.2.10
 
-if [ "$HAVE_OPENGL" != 'no' ]; then
+if [ "$HAVE_OPENGL" != 'no' ] && [ "$HAVE_GLES" != 'yes' ]; then
    if [ "$OS" = 'Darwin' ]; then
       check_lib CG "-framework Cg" cgCreateContext
    else
@@ -136,7 +161,7 @@ if [ "$HAVE_OPENGL" != 'no' ]; then
       check_lib_cxx CG -lCg cgCreateContext
    fi
 else
-   echo "Ignoring Cg. OpenGL is not enabled."
+   echo "Ignoring Cg. Desktop OpenGL is not enabled."
    HAVE_CG='no'
 fi
 
@@ -195,6 +220,16 @@ else
    HAVE_GLES=no
 fi
 
+if [ "$OS" = 'Darwin' ]; then
+   check_lib FBO "-framework OpenGL" glFramebufferTexture2D
+else
+   if [ "$HAVE_GLES" = "yes" ]; then
+      [ $HAVE_FBO != "no" ] && HAVE_FBO=yes
+   else
+      check_lib FBO -lGL glFramebufferTexture2D
+   fi
+fi
+
 check_pkgconf FREETYPE freetype2
 check_pkgconf X11 x11
 [ "$HAVE_X11" = "no" ] && HAVE_XEXT=no && HAVE_XF86VM=no && HAVE_XINERAMA=no
@@ -219,6 +254,7 @@ check_macro NEON __ARM_NEON__
 add_define_make OS "$OS"
 
 # Creates config.mk and config.h.
-VARS="RGUI ALSA OSS OSS_BSD OSS_LIB AL RSOUND ROAR JACK COREAUDIO PULSE SDL OPENGL GLES VG EGL KMS GBM DRM DYLIB GETOPT_LONG THREADS CG LIBXML2 SDL_IMAGE ZLIB DYNAMIC FFMPEG AVCODEC AVFORMAT AVUTIL SWSCALE FREETYPE XVIDEO X11 XEXT XF86VM XINERAMA NETPLAY NETWORK_CMD STDIN_CMD COMMAND SOCKET_LEGACY FBO STRL PYTHON FFMPEG_ALLOC_CONTEXT3 FFMPEG_AVCODEC_OPEN2 FFMPEG_AVIO_OPEN FFMPEG_AVFORMAT_WRITE_HEADER FFMPEG_AVFORMAT_NEW_STREAM FFMPEG_AVCODEC_ENCODE_AUDIO2 FFMPEG_AVCODEC_ENCODE_VIDEO2 BSV_MOVIE VIDEOCORE NEON"
+add_define_make GLOBAL_CONFIG_DIR "$GLOBAL_CONFIG_DIR"
+VARS="RGUI ALSA OSS OSS_BSD OSS_LIB AL RSOUND ROAR JACK COREAUDIO PULSE SDL OPENGL GLES VG EGL KMS GBM DRM DYLIB GETOPT_LONG THREADS CG LIBXML2 SDL_IMAGE ZLIB DYNAMIC FFMPEG AVCODEC AVFORMAT AVUTIL SWSCALE FREETYPE XVIDEO X11 XEXT XF86VM XINERAMA NETPLAY NETWORK_CMD STDIN_CMD COMMAND SOCKET_LEGACY FBO STRL PYTHON FFMPEG_ALLOC_CONTEXT3 FFMPEG_AVCODEC_OPEN2 FFMPEG_AVIO_OPEN FFMPEG_AVFORMAT_WRITE_HEADER FFMPEG_AVFORMAT_NEW_STREAM FFMPEG_AVCODEC_ENCODE_AUDIO2 FFMPEG_AVCODEC_ENCODE_VIDEO2 BSV_MOVIE VIDEOCORE NEON FLOATHARD FLOATSOFTFP"
 create_config_make config.mk $VARS
 create_config_header config.h $VARS

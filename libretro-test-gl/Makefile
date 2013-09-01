@@ -24,14 +24,21 @@ else ifeq ($(platform), osx)
    fpic := -fPIC
    SHARED := -dynamiclib
    GL_LIB := -framework OpenGL
+else ifeq ($(platform), pi)
+   TARGET := $(TARGET_NAME)_libretro.so
+   fpic := -fPIC
+   SHARED := -shared -Wl,--version-script=link.T -Wl,--no-undefined
+   CFLAGS += -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/vmcs_host/linux
+   GLES := 1
+   LIBS += -L/opt/vc/lib
 else ifeq ($(platform), ios)
    TARGET := $(TARGET_NAME)_libretro_ios.dylib
    fpic := -fPIC
    SHARED := -dynamiclib
    GL_LIB := -framework OpenGLES
-	DEFINES := -DIOS
-	CFLAGS += -DGLES $(DEFINES)
-	CC = clang -arch armv7 -isysroot $(IOSSDK)
+   DEFINES := -DIOS
+   CFLAGS += -DGLES $(DEFINES)
+   CC = clang -arch armv7 -isysroot $(IOSSDK)
 else ifeq ($(platform), qnx)
    TARGET := $(TARGET_NAME)_libretro_qnx.so
    fpic := -fPIC
@@ -41,7 +48,34 @@ else ifeq ($(platform), qnx)
    CC = qcc -Vgcc_ntoarmv7le
    AR = qcc -Vgcc_ntoarmv7le
    CFLAGS += -D__BLACKBERRY_QNX__ -DGLES
-	GL_LIB := -lGLESv2
+   GL_LIB := -lGLESv2
+else ifneq (,$(findstring armv,$(platform)))
+   CC = gcc
+   TARGET := $(TARGET_NAME)_libretro.so
+   fpic := -fPIC
+   SHARED := -shared -Wl,--version-script=link.T -Wl,--no-undefined
+   CFLAGS += -I.
+ifneq (,$(findstring gles,$(platform)))
+   GLES := 1
+else
+   GL_LIB := -lGL
+endif
+ifneq (,$(findstring cortexa8,$(platform)))
+   CFLAGS += -marm -mcpu=cortex-a8
+else ifneq (,$(findstring cortexa9,$(platform)))
+   CFLAGS += -marm -mcpu=cortex-a9
+endif
+   CFLAGS += -marm
+ifneq (,$(findstring neon,$(platform)))
+   CFLAGS += -mfpu=neon
+   HAVE_NEON = 1
+endif
+ifneq (,$(findstring softfloat,$(platform)))
+   CFLAGS += -mfloat-abi=softfp
+else ifneq (,$(findstring hardfloat,$(platform)))
+   CFLAGS += -mfloat-abi=hard
+endif
+   CFLAGS += -DARM
 else
    CC = gcc
    TARGET := $(TARGET_NAME)_retro.dll
@@ -57,19 +91,25 @@ else
 endif
 
 ifeq ($(platform), qnx)
-CFLAGS += -Wc,-std=gnu99
+   CFLAGS += -Wc,-std=gnu99
 else
-CFLAGS += -std=gnu99
+   CFLAGS += -std=gnu99
 endif
 
-OBJECTS := libretro-test.o
+OBJECTS := libretro-test.o ../gfx/glsym/rglgen.o
 CFLAGS += -Wall -pedantic $(fpic)
 
 ifeq ($(GLES), 1)
-   CFLAGS += -DGLES
+   CFLAGS += -DGLES -DHAVE_OPENGLES2
    LIBS += -lGLESv2
+   OBJECTS += ../gfx/glsym/glsym_es2.o
 else
+   OBJECTS += ../gfx/glsym/glsym_gl.o
    LIBS += $(GL_LIB)
+endif
+
+ifeq ($(CORE), 1)
+   CFLAGS += -DCORE
 endif
 
 all: $(TARGET)

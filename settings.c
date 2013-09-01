@@ -102,6 +102,8 @@ const char *config_get_default_video(void)
          return "vg";
       case VIDEO_NULL:
          return "null";
+      case VIDEO_OMAP:
+         return "omap";
       default:
          return NULL;
    }
@@ -131,8 +133,8 @@ const char *config_get_default_input(void)
          return "gx";
       case INPUT_LINUXRAW:
          return "linuxraw";
-      case INPUT_IOS:
-         return "ios_input";
+      case INPUT_APPLE:
+         return "apple_input";
       case INPUT_QNX:
       	 return "qnx_input";
       case INPUT_NULL:
@@ -165,6 +167,9 @@ void config_set_defaults(void)
    g_settings.video.disable_composition = disable_composition;
    g_settings.video.vsync = vsync;
    g_settings.video.hard_sync = hard_sync;
+   g_settings.video.hard_sync_frames = hard_sync_frames;
+   g_settings.video.black_frame_insertion = black_frame_insertion;
+   g_settings.video.swap_interval = swap_interval;
    g_settings.video.threaded = video_threaded;
    g_settings.video.smooth = video_smooth;
    g_settings.video.force_aspect = force_aspect;
@@ -193,6 +198,7 @@ void config_set_defaults(void)
 
    g_settings.audio.enable = audio_enable;
    g_settings.audio.out_rate = out_rate;
+   g_settings.audio.block_frames = 0;
    g_settings.audio.in_rate = out_rate;
    if (audio_device)
       strlcpy(g_settings.audio.device, audio_device, sizeof(g_settings.audio.device));
@@ -206,6 +212,7 @@ void config_set_defaults(void)
    g_settings.rewind_buffer_size = rewind_buffer_size;
    g_settings.rewind_granularity = rewind_granularity;
    g_settings.slowmotion_ratio = slowmotion_ratio;
+   g_settings.fastforward_ratio = fastforward_ratio;
    g_settings.pause_nonactive = pause_nonactive;
    g_settings.autosave_interval = autosave_interval;
 
@@ -216,6 +223,7 @@ void config_set_defaults(void)
    g_settings.network_cmd_enable   = network_cmd_enable;
    g_settings.network_cmd_port     = network_cmd_port;
    g_settings.stdin_cmd_enable     = stdin_cmd_enable;
+   g_settings.game_history_size    = game_history_size;
 
    rarch_assert(sizeof(g_settings.input.binds[0]) >= sizeof(retro_keybinds_1));
    rarch_assert(sizeof(g_settings.input.binds[1]) >= sizeof(retro_keybinds_rest));
@@ -243,6 +251,7 @@ void config_set_defaults(void)
    g_settings.input.turbo_period = turbo_period;
    g_settings.input.turbo_duty_cycle = turbo_duty_cycle;
    g_settings.input.overlay_opacity = 1.0f;
+   g_settings.input.overlay_scale = 1.0f;
    g_settings.input.debug_enable = input_debug_enable;
    g_settings.input.autodetect_enable = input_autodetect_enable;
 #ifdef ANDROID
@@ -251,6 +260,11 @@ void config_set_defaults(void)
 
    for (int i = 0; i < MAX_PLAYERS; i++)
       g_settings.input.joypad_map[i] = i;
+
+   g_extern.console.screen.viewports.custom_vp.width = 0;
+   g_extern.console.screen.viewports.custom_vp.height = 0;
+   g_extern.console.screen.viewports.custom_vp.x = 0;
+   g_extern.console.screen.viewports.custom_vp.y = 0;
 
 #ifdef RARCH_CONSOLE
    g_extern.lifecycle_mode_state |= ((1ULL << MODE_INFO_DRAW) | (1ULL << MODE_MENU));
@@ -265,7 +279,6 @@ void config_set_defaults(void)
    strlcpy(g_extern.savefile_dir, default_paths.sram_dir, sizeof(g_extern.savefile_dir));
    g_extern.console.screen.gamma_correction = DEFAULT_GAMMA;
    g_extern.lifecycle_mode_state |= (1ULL << MODE_AUDIO_CUSTOM_BGM_ENABLE);
-   g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_THROTTLE_ENABLE);
    g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_TRIPLE_BUFFERING_ENABLE);
    g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE);
    g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_FLICKER_FILTER_ENABLE);
@@ -282,14 +295,34 @@ void config_set_defaults(void)
    g_extern.verbose = true;
 
    g_extern.console.sound.mode = SOUND_MODE_NORMAL;
-   g_extern.console.screen.viewports.custom_vp.width = 0;
-   g_extern.console.screen.viewports.custom_vp.height = 0;
-   g_extern.console.screen.viewports.custom_vp.x = 0;
-   g_extern.console.screen.viewports.custom_vp.y = 0;
 #ifdef _XBOX1
    g_extern.console.sound.volume_level = 0;
 #endif
 #endif
+   
+#ifdef HAVE_OVERLAY
+#if defined(__QNX__)
+   strlcpy(g_extern.overlay_dir, "app/native/overlays/", sizeof(g_extern.overlay_dir));
+   RARCH_LOG("Setting default overlay %s ...\n", "app/native/overlays/snes-landscape.cfg");
+   strlcpy(g_settings.input.overlay, "app/native/overlays/snes-landscape.cfg", sizeof(g_settings.input.overlay));
+#elif defined(IOS)
+   strlcpy(g_extern.overlay_dir, "/Applications/RetroArch.app/overlays/", sizeof(g_extern.overlay_dir));
+#elif defined(ANDROID)
+   strlcpy(g_extern.overlay_dir, "/data/data/org.retroarch/overlays/", sizeof(g_extern.overlay_dir));
+#endif
+#endif
+
+#if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_HLSL)
+#if defined(__QNX__)
+   strlcpy(g_settings.video.shader_dir, "/app/native/shaders_glsl/", sizeof(g_settings.video.shader_dir));
+#elif defined(IOS)
+   strlcpy(g_settings.video.shader_dir, "/Applications/RetroArch.app/shaders_glsl/", sizeof(g_settings.video.shader_dir));
+#elif defined(ANDROID)
+   strlcpy(g_settings.video.shader_dir, "/data/data/org.retroarch/shaders_glsl/", sizeof(g_settings.video.shader_dir));
+#endif
+#endif
+
+   g_extern.config_save_on_exit = config_save_on_exit;
 
 #if defined(HAVE_RMENU) || defined(HAVE_RGUI)
    /* Avoid reloading config on every ROM load */
@@ -362,9 +395,12 @@ static config_file_t *open_default_config_file(void)
    // Try this as a last chance ...
    if (!conf)
    {
-      strlcpy(conf_path, "/etc/retroarch.cfg", sizeof(conf_path));
+#ifndef GLOBAL_CONFIG_DIR
+#define GLOBAL_CONFIG_DIR "/etc"
+#endif
+      fill_pathname_join(conf_path, GLOBAL_CONFIG_DIR, "retroarch.cfg", sizeof(conf_path));
+      RARCH_LOG("Looking for config in: \"%s\".\n", conf_path);
       conf = config_file_new(conf_path);
-      RARCH_LOG("Looking for config in: \"/etc/retroarch.cfg\".\n");
    }
 
    if (conf)
@@ -452,12 +488,22 @@ bool config_load_file(const char *path)
    CONFIG_GET_BOOL(video.disable_composition, "video_disable_composition");
    CONFIG_GET_BOOL(video.vsync, "video_vsync");
    CONFIG_GET_BOOL(video.hard_sync, "video_hard_sync");
+
+   CONFIG_GET_INT(video.hard_sync_frames, "video_hard_sync_frames");
+   if (g_settings.video.hard_sync_frames > 3)
+      g_settings.video.hard_sync_frames = 3;
+
+   CONFIG_GET_BOOL(video.black_frame_insertion, "video_black_frame_insertion");
+   CONFIG_GET_INT(video.swap_interval, "video_swap_interval");
+   g_settings.video.swap_interval = max(g_settings.video.swap_interval, 1);
+   g_settings.video.swap_interval = min(g_settings.video.swap_interval, 4);
    CONFIG_GET_BOOL(video.threaded, "video_threaded");
    CONFIG_GET_BOOL(video.smooth, "video_smooth");
    CONFIG_GET_BOOL(video.force_aspect, "video_force_aspect");
    CONFIG_GET_BOOL(video.scale_integer, "video_scale_integer");
    CONFIG_GET_BOOL(video.crop_overscan, "video_crop_overscan");
    CONFIG_GET_FLOAT(video.aspect_ratio, "video_aspect_ratio");
+   CONFIG_GET_INT(video.aspect_ratio_idx, "aspect_ratio_index");
    CONFIG_GET_BOOL(video.aspect_ratio_auto, "video_aspect_ratio_auto");
    CONFIG_GET_FLOAT(video.refresh_rate, "video_refresh_rate");
 
@@ -476,7 +522,6 @@ bool config_load_file(const char *path)
 #ifdef RARCH_CONSOLE
    /* TODO - will be refactored later to make it more clean - it's more 
     * important that it works for consoles right now */
-   CONFIG_GET_INT(video.aspect_ratio_idx, "aspect_ratio_index");
 
    for (unsigned i = 0; i < MAX_PLAYERS; i++)
    {
@@ -490,7 +535,6 @@ bool config_load_file(const char *path)
    CONFIG_GET_BOOL_EXTERN(console.screen.gamma_correction, "gamma_correction");
 
    bool msg_enable = false;
-   bool throttle_enable = false;
    bool triple_buffering_enable = false;
    bool custom_bgm_enable = false;
    bool flicker_filter_enable = false;
@@ -507,14 +551,6 @@ bool config_load_file(const char *path)
          g_extern.lifecycle_mode_state |= (1ULL << MODE_INFO_DRAW);
       else 
          g_extern.lifecycle_mode_state &= ~(1ULL << MODE_INFO_DRAW);
-   }
-
-   if (config_get_bool(conf, "throttle_enable", &throttle_enable))
-   {
-      if (throttle_enable)
-         g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_THROTTLE_ENABLE);
-      else
-         g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_THROTTLE_ENABLE);
    }
 
    if (config_get_bool(conf, "triple_buffering_enable", &triple_buffering_enable))
@@ -559,11 +595,12 @@ bool config_load_file(const char *path)
    CONFIG_GET_INT_EXTERN(audio_data.mute, "audio_mute");
    CONFIG_GET_INT_EXTERN(console.screen.orientation, "screen_orientation");
    CONFIG_GET_INT_EXTERN(console.sound.mode, "sound_mode");
+#endif
+
    CONFIG_GET_INT_EXTERN(console.screen.viewports.custom_vp.x, "custom_viewport_x");
    CONFIG_GET_INT_EXTERN(console.screen.viewports.custom_vp.y, "custom_viewport_y");
    CONFIG_GET_INT_EXTERN(console.screen.viewports.custom_vp.width, "custom_viewport_width");
    CONFIG_GET_INT_EXTERN(console.screen.viewports.custom_vp.height, "custom_viewport_height");
-#endif
 
    unsigned msg_color = 0;
    if (config_get_hex(conf, "video_message_color", &msg_color))
@@ -582,6 +619,8 @@ bool config_load_file(const char *path)
 #endif
 
    CONFIG_GET_PATH(video.shader_dir, "video_shader_dir");
+   if (!strcmp(g_settings.video.shader_dir, "default"))
+      *g_settings.video.shader_dir = '\0';
 
    CONFIG_GET_FLOAT(input.axis_threshold, "input_axis_threshold");
    CONFIG_GET_BOOL(input.netplay_client_swap_input, "netplay_client_swap_input");
@@ -596,6 +635,7 @@ bool config_load_file(const char *path)
    // Audio settings.
    CONFIG_GET_BOOL(audio.enable, "audio_enable");
    CONFIG_GET_INT(audio.out_rate, "audio_out_rate");
+   CONFIG_GET_INT(audio.block_frames, "audio_block_frames");
    CONFIG_GET_STRING(audio.device, "audio_device");
    CONFIG_GET_INT(audio.latency, "audio_latency");
    CONFIG_GET_BOOL(audio.sync, "audio_sync");
@@ -623,6 +663,18 @@ bool config_load_file(const char *path)
 
 #ifdef HAVE_RGUI
    CONFIG_GET_PATH(rgui_browser_directory, "rgui_browser_directory");
+   if (!strcmp(g_settings.rgui_browser_directory, "default"))
+      *g_settings.rgui_browser_directory = '\0';
+#endif
+
+#ifdef HAVE_OVERLAY
+   CONFIG_GET_PATH_EXTERN(overlay_dir, "overlay_directory");
+   if (!strcmp(g_extern.overlay_dir, "default"))
+      *g_extern.overlay_dir = '\0';
+
+   CONFIG_GET_PATH(input.overlay, "input_overlay");
+   CONFIG_GET_FLOAT(input.overlay_opacity, "input_overlay_opacity");
+   CONFIG_GET_FLOAT(input.overlay_scale, "input_overlay_scale");
 #endif
 
    CONFIG_GET_BOOL(rewind_enable, "rewind_enable");
@@ -635,6 +687,8 @@ bool config_load_file(const char *path)
    CONFIG_GET_FLOAT(slowmotion_ratio, "slowmotion_ratio");
    if (g_settings.slowmotion_ratio < 1.0f)
       g_settings.slowmotion_ratio = 1.0f;
+
+   CONFIG_GET_FLOAT(fastforward_ratio, "fastforward_ratio");
 
    CONFIG_GET_BOOL(pause_nonactive, "pause_nonactive");
    CONFIG_GET_INT(autosave_interval, "autosave_interval");
@@ -651,11 +705,12 @@ bool config_load_file(const char *path)
    CONFIG_GET_INT(network_cmd_port, "network_cmd_port");
    CONFIG_GET_BOOL(stdin_cmd_enable, "stdin_cmd_enable");
 
+   CONFIG_GET_PATH(game_history_path, "game_history_path");
+   CONFIG_GET_INT(game_history_size, "game_history_size");
+
    CONFIG_GET_INT(input.turbo_period, "input_turbo_period");
    CONFIG_GET_INT(input.turbo_duty_cycle, "input_duty_cycle");
 
-   CONFIG_GET_PATH(input.overlay, "input_overlay");
-   CONFIG_GET_FLOAT(input.overlay_opacity, "input_overlay_opacity");
    CONFIG_GET_BOOL(input.debug_enable, "input_debug_enable");
 
    CONFIG_GET_BOOL(input.autodetect_enable, "input_autodetect_enable");
@@ -669,9 +724,13 @@ bool config_load_file(const char *path)
    CONFIG_GET_INT(input.icade_profile[3], "input_autodetect_icade_profile_pad4");
 #endif
 
+   CONFIG_GET_BOOL_EXTERN(config_save_on_exit, "config_save_on_exit");
+
    if (!g_extern.has_set_save_path && config_get_path(conf, "savefile_directory", tmp_str, sizeof(tmp_str)))
    {
-      if (path_is_directory(tmp_str))
+      if (!strcmp(tmp_str, "default"))
+         *g_extern.savefile_dir = '\0';
+      else if (path_is_directory(tmp_str))
       {
          strlcpy(g_extern.savefile_dir, tmp_str, sizeof(g_extern.savefile_dir));
          strlcpy(g_extern.savefile_name_srm, tmp_str, sizeof(g_extern.savefile_name_srm));
@@ -683,7 +742,9 @@ bool config_load_file(const char *path)
 
    if (!g_extern.has_set_state_path && config_get_path(conf, "savestate_directory", tmp_str, sizeof(tmp_str)))
    {
-      if (path_is_directory(tmp_str))
+      if (!strcmp(tmp_str, "default"))
+         *g_extern.savestate_dir = '\0';
+      else if (path_is_directory(tmp_str))
       {
          strlcpy(g_extern.savestate_dir, tmp_str, sizeof(g_extern.savestate_dir));
          strlcpy(g_extern.savestate_name, tmp_str, sizeof(g_extern.savestate_name));
@@ -698,6 +759,9 @@ bool config_load_file(const char *path)
       RARCH_WARN("system_directory is not set in config. Assuming system directory is same folder as game: \"%s\".\n",
             g_settings.system_directory);
    }
+
+   if (!strcmp(g_settings.system_directory, "default"))
+      *g_settings.system_directory = '\0';
 
    config_read_keybinds_conf(conf);
 
@@ -911,17 +975,59 @@ bool config_save_file(const char *path)
    config_set_int(conf, "rewind_granularity", g_settings.rewind_granularity);
    config_set_string(conf, "video_shader", g_settings.video.shader_path);
    config_set_bool(conf, "video_shader_enable", g_settings.video.shader_enable);
-   config_set_float(conf, "video_aspect_ratio", g_extern.system.aspect_ratio);
+   config_set_float(conf, "video_aspect_ratio", g_settings.video.aspect_ratio);
+   config_set_float(conf, "video_xscale", g_settings.video.xscale);
+   config_set_float(conf, "video_yscale", g_settings.video.yscale);
+   config_set_bool(conf, "video_crop_overscan", g_settings.video.crop_overscan);
+   config_set_bool(conf, "video_scale_integer", g_settings.video.scale_integer);
    config_set_bool(conf, "video_smooth", g_settings.video.smooth);
+   config_set_float(conf, "video_refresh_rate", g_settings.video.refresh_rate);
    config_set_bool(conf, "video_vsync", g_settings.video.vsync);
+   config_set_bool(conf, "video_hard_sync", g_settings.video.hard_sync);
+   config_set_int(conf, "video_hard_sync_frames", g_settings.video.hard_sync_frames);
+   config_set_bool(conf, "video_black_frame_insertion", g_settings.video.black_frame_insertion);
+   config_set_int(conf, "video_swap_interval", g_settings.video.swap_interval);
    config_set_int(conf, "aspect_ratio_index", g_settings.video.aspect_ratio_idx);
    config_set_string(conf, "audio_device", g_settings.audio.device);
    config_set_bool(conf, "audio_rate_control", g_settings.audio.rate_control);
    config_set_float(conf, "audio_rate_control_delta", g_settings.audio.rate_control_delta);
-   config_set_string(conf, "system_directory", g_settings.system_directory);
+
+   if (*g_settings.system_directory)
+      config_set_string(conf, "system_directory", g_settings.system_directory);
+   else
+      config_set_string(conf, "system_directory", "default");
+
+   if (*g_extern.savefile_dir)
+      config_set_string(conf, "savefile_directory", g_extern.savefile_dir);
+   else
+      config_set_string(conf, "savefile_directory", "default");
+
+   if (*g_extern.savestate_dir)
+      config_set_string(conf, "savestate_directory", g_extern.savestate_dir);
+   else
+      config_set_string(conf, "savestate_directory", "default");
+
+   if (*g_settings.video.shader_dir)
+      config_set_string(conf, "video_shader_dir", g_settings.video.shader_dir);
+   else
+      config_set_string(conf, "video_shader_dir", "default");
 
 #if defined(HAVE_RGUI) || defined(HAVE_RMENU)
-   config_set_string(conf, "rgui_browser_directory", g_settings.rgui_browser_directory);
+   if (*g_settings.rgui_browser_directory)
+      config_set_string(conf, "rgui_browser_directory", g_settings.rgui_browser_directory);
+   else
+      config_set_string(conf, "rgui_browser_directory", "default");
+#endif
+
+#ifdef HAVE_OVERLAY
+   if (*g_extern.overlay_dir)
+      config_set_string(conf, "overlay_directory", g_extern.overlay_dir);
+   else
+      config_set_string(conf, "overlay_directory", "default");
+   
+   config_set_string(conf, "input_overlay", g_settings.input.overlay);
+   config_set_float(conf, "input_overlay_opacity", g_settings.input.overlay_opacity);
+   config_set_float(conf, "input_overlay_scale", g_settings.input.overlay_scale);
 #endif
 
 #ifdef ANDROID
@@ -936,11 +1042,6 @@ bool config_save_file(const char *path)
 #ifdef _XBOX1
    config_set_int(conf, "sound_volume_level", g_extern.console.sound.volume_level);
 #endif
-   if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_THROTTLE_ENABLE))
-      config_set_bool(conf, "throttle_enable", true);
-   else
-      config_set_bool(conf, "throttle_enable", false);
-
    if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_TRIPLE_BUFFERING_ENABLE))
       config_set_bool(conf, "triple_buffering_enable", true);
    else
@@ -974,6 +1075,7 @@ bool config_save_file(const char *path)
    config_set_float(conf, "video_font_size", g_settings.video.font_size);
 
    // g_extern
+   config_set_bool(conf, "config_save_on_exit", g_extern.config_save_on_exit);
    config_set_int(conf, "sound_mode", g_extern.console.sound.mode);
    config_set_int(conf, "state_slot", g_extern.state_slot);
    config_set_int(conf, "audio_mute", g_extern.audio_data.mute);
@@ -1110,17 +1212,6 @@ void settings_set(uint64_t settings)
    if (settings & (1ULL << S_SAVESTATE_INCREMENT))
       g_extern.state_slot++;
 
-   if (settings & (1ULL << S_THROTTLE))
-   {
-      if(!g_extern.system.force_nonblock)
-      {
-         if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_THROTTLE_ENABLE))
-            g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_THROTTLE_ENABLE);
-         else
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_THROTTLE_ENABLE);
-      }
-   }
-
    if (settings & (1ULL << S_TRIPLE_BUFFERING))
    {
       if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_TRIPLE_BUFFERING_ENABLE))
@@ -1171,12 +1262,6 @@ void settings_set(uint64_t settings)
 
    if (settings & (1ULL << S_DEF_ROTATION))
       g_extern.console.screen.orientation = ORIENTATION_NORMAL;
-
-   if (settings & (1ULL << S_DEF_THROTTLE))
-   {
-      if(!g_extern.system.force_nonblock)
-         g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_THROTTLE_ENABLE);
-   }
 
    if (settings & (1ULL << S_DEF_TRIPLE_BUFFERING))
       g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_TRIPLE_BUFFERING_ENABLE);

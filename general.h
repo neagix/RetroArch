@@ -38,6 +38,15 @@
 #include "config.h"
 #endif
 
+#ifndef PACKAGE_VERSION
+#ifdef __QNX__
+/* FIXME - avoid too many decimal points in number error */
+#define PACKAGE_VERSION "0996"
+#else
+#define PACKAGE_VERSION "0.9.9.6"
+#endif
+#endif
+
 // Platform-specific headers
 // PS3
 #if defined(__CELLOS_LV2__) && !defined(__PSL1GHT__)
@@ -62,7 +71,7 @@
 #endif
 
 // Wii and PSL1GHT - for usleep (among others)
-#if defined(GEKKO) || defined(__PSL1GHT__) || defined(__BLACKBERRY_QNX__)
+#if defined(GEKKO) || defined(__PSL1GHT__) || defined(__QNX__)
 #include <unistd.h>
 #endif
 
@@ -100,7 +109,6 @@ enum menu_enums
 {
    MODE_GAME = 0,
    MODE_LOAD_GAME,
-   MODE_INIT,
    MODE_MENU,
    MODE_MENU_WIDESCREEN,
    MODE_MENU_HD,
@@ -109,7 +117,6 @@ enum menu_enums
    MODE_INFO_DRAW,
    MODE_FPS_DRAW,
    MODE_EXTLAUNCH_MULTIMAN,
-   MODE_EXIT,
    MODE_EXITSPAWN,
    MODE_EXITSPAWN_START_GAME,
    MODE_EXITSPAWN_MULTIMAN,
@@ -117,12 +124,9 @@ enum menu_enums
    MODE_VIDEO_TRIPLE_BUFFERING_ENABLE,
    MODE_VIDEO_FLICKER_FILTER_ENABLE,
    MODE_VIDEO_SOFT_FILTER_ENABLE,
-   MODE_VIDEO_THROTTLE_ENABLE,
    MODE_VIDEO_PAL_ENABLE,
    MODE_VIDEO_PAL_TEMPORAL_ENABLE,
-   MODE_VIDEO_PAL_VSYNC_BLOCK,
    MODE_AUDIO_CUSTOM_BGM_ENABLE,
-   MODE_OSK_DRAW,
    MODE_OSK_ENTRY_SUCCESS,
    MODE_OSK_ENTRY_FAIL,
 };
@@ -155,6 +159,9 @@ struct settings
       unsigned fullscreen_y;
       bool vsync;
       bool hard_sync;
+      bool black_frame_insertion;
+      unsigned swap_interval;
+      unsigned hard_sync_frames;
       bool smooth;
       bool force_aspect;
       bool crop_overscan;
@@ -196,6 +203,7 @@ struct settings
       char driver[32];
       bool enable;
       unsigned out_rate;
+      unsigned block_frames;
       float in_rate;
       char device[PATH_MAX];
       unsigned latency;
@@ -238,11 +246,14 @@ struct settings
 
       char overlay[PATH_MAX];
       float overlay_opacity;
+      float overlay_scale;
 
       char autoconfig_dir[PATH_MAX];
    } input;
 
    char core_options_path[PATH_MAX];
+   char game_history_path[PATH_MAX];
+   unsigned game_history_size;
 
    char libretro[PATH_MAX];
    char cheat_database[PATH_MAX];
@@ -256,6 +267,7 @@ struct settings
    unsigned rewind_granularity;
 
    float slowmotion_ratio;
+   float fastforward_ratio;
 
    bool pause_nonactive;
    unsigned autosave_interval;
@@ -345,6 +357,10 @@ struct global
    char savefile_dir[PATH_MAX];
    char savestate_dir[PATH_MAX];
 
+#ifdef HAVE_OVERLAY
+   char overlay_dir[PATH_MAX];
+#endif
+
    bool block_patch;
    bool ups_pref;
    bool bps_pref;
@@ -354,6 +370,12 @@ struct global
    char ips_name[PATH_MAX];
 
    unsigned state_slot;
+
+   struct
+   {
+      rarch_time_t minimum_frame_time;
+      rarch_time_t last_frame_time;
+   } frame_limit;
 
    struct
    {
@@ -374,9 +396,13 @@ struct global
       char valid_extensions[PATH_MAX];
       
       retro_keyboard_event_t key_event;
+      retro_audio_callback_t audio_callback;
 
       struct retro_disk_control_callback disk_control; 
       struct retro_hw_render_callback hw_render_callback;
+
+      struct retro_frame_time_callback frame_time;
+      retro_usec_t frame_time_last;
 
       core_option_manager_t *core_options;
    } system;
@@ -415,7 +441,6 @@ struct global
 
       float volume_db;
       float volume_gain;
-
    } audio_data;
 
    struct
@@ -448,6 +473,8 @@ struct global
    } filter;
 
    msg_queue_t *msg_queue;
+
+   bool exec;
 
    // Rewind support.
    state_manager_t *state_manager;
@@ -582,6 +609,7 @@ struct global
 
    bool main_is_init;
    bool error_in_init;
+   bool config_save_on_exit;
    char error_string[1024];
    jmp_buf error_sjlj_context;
    unsigned menu_toggle_behavior;
@@ -618,7 +646,6 @@ enum
    S_REWIND,
    S_SAVESTATE_DECREMENT,
    S_SAVESTATE_INCREMENT,
-   S_THROTTLE,
    S_TRIPLE_BUFFERING,
    S_REFRESH_RATE_DECREMENT,
    S_REFRESH_RATE_INCREMENT,
@@ -630,7 +657,6 @@ enum
    S_DEF_AUDIO_CONTROL_RATE,
    S_DEF_HW_TEXTURE_FILTER,
    S_DEF_ROTATION,
-   S_DEF_THROTTLE,
    S_DEF_TRIPLE_BUFFERING,
    S_DEF_SAVE_STATE,
    S_DEF_REFRESH_RATE,
@@ -674,6 +700,7 @@ void rarch_disk_control_set_index(unsigned index);
 void rarch_disk_control_append_image(const char *path);
 void rarch_init_autosave(void);
 void rarch_deinit_autosave(void);
+void rarch_take_screenshot(void);
 
 void rarch_load_state(void);
 void rarch_save_state(void);
@@ -784,7 +811,7 @@ static inline void rarch_sleep(unsigned msec)
    Sleep(msec);
 #elif defined(XENON)
    udelay(1000 * msec);
-#elif defined(GEKKO) || defined(__PSL1GHT__) || defined(__BLACKBERRY_QNX__)
+#elif defined(GEKKO) || defined(__PSL1GHT__) || defined(__QNX__)
    usleep(1000 * msec);
 #else
    struct timespec tv = {0};

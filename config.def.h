@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2013 - Hans-Kristian Arntzen
+ *  Copyright (C) 2011-2013 - Daniel De Matteis
  * 
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -43,6 +44,7 @@ enum
    VIDEO_D3D9,
    VIDEO_VG,
    VIDEO_NULL,
+   VIDEO_OMAP,
 
    AUDIO_RSOUND,
    AUDIO_OSS,
@@ -73,7 +75,7 @@ enum
    INPUT_WII,
    INPUT_XINPUT,
    INPUT_LINUXRAW,
-   INPUT_IOS,
+   INPUT_APPLE,
    INPUT_QNX,
    INPUT_NULL
 };
@@ -160,10 +162,12 @@ enum
 #define INPUT_DEFAULT_DRIVER INPUT_WII
 #elif defined(HAVE_XVIDEO)
 #define INPUT_DEFAULT_DRIVER INPUT_X
-#elif defined(IOS)
-#define INPUT_DEFAULT_DRIVER INPUT_IOS
+#elif defined(IOS) || defined(OSX)
+#define INPUT_DEFAULT_DRIVER INPUT_APPLE
 #elif defined(__BLACKBERRY_QNX__)
 #define INPUT_DEFAULT_DRIVER INPUT_QNX
+#elif defined(PANDORA)
+#define INPUT_DEFAULT_DRIVER INPUT_LINUXRAW
 #else
 #define INPUT_DEFAULT_DRIVER INPUT_NULL
 #endif
@@ -174,26 +178,6 @@ enum
 #define DEFAULT_ASPECT_RATIO 1.3333f
 #else
 #define DEFAULT_ASPECT_RATIO -1.0f
-#endif
-
-#ifdef HAVE_DYNAMIC
-#ifdef _WIN32
-#define EXT_EXECUTABLES "dll|DLL"
-#elif defined(__APPLE__)
-#define EXT_EXECUTABLES "dylib"
-#else
-#define EXT_EXECUTABLES "so|SO"
-#endif
-#else
-#if defined(__CELLOS_LV2__)
-#define EXT_EXECUTABLES "self|SELF|bin|BIN"
-#elif defined(_XBOX1)
-#define EXT_EXECUTABLES "xbe|XBE"
-#elif defined(_XBOX360)
-#define EXT_EXECUTABLES "xex|XEX"
-#elif defined(GEKKO)
-#define EXT_EXECUTABLES "dol|DOL"
-#endif
 #endif
 
 ////////////////
@@ -225,6 +209,19 @@ static const bool vsync = true;
 
 // Attempts to hard-synchronize CPU and GPU. Can reduce latency at cost of performance.
 static const bool hard_sync = false;
+// Configures how many frames the GPU can run ahead of CPU.
+// 0: Syncs to GPU immediately.
+// 1: Syncs to previous frame.
+// 2: Etc ...
+static const unsigned hard_sync_frames = 0;
+
+// Inserts a black frame inbetween frames.
+// Useful for 120 Hz monitors who want to play 60 Hz material with eliminated ghosting. video_refresh_rate should still be configured as if it is a 60 Hz monitor (divide refresh rate by 2).
+static bool black_frame_insertion = false;
+
+// Uses a custom swap interval for VSync.
+// Set this to effectively halve monitor refresh rate.
+static unsigned swap_interval = 1;
 
 // Threaded video. Will possibly increase performance significantly at cost of worse synchronization and latency.
 static const bool video_threaded = false;
@@ -257,6 +254,13 @@ static unsigned aspect_ratio_idx = ASPECT_RATIO_16_9;
 static unsigned aspect_ratio_idx = ASPECT_RATIO_4_3;
 #else
 static unsigned aspect_ratio_idx = ASPECT_RATIO_CONFIG; // Use g_settings.video.aspect_ratio.
+#endif
+
+// Save configuration file on exit
+#if defined(RARCH_CONSOLE) || defined(RARCH_MOBILE)
+static bool config_save_on_exit = true;
+#else
+static bool config_save_on_exit = false;
 #endif
 
 // Crop overscanned frames.
@@ -298,7 +302,9 @@ static const bool font_enable = true;
 // This value should stay close to 60Hz to avoid large pitch changes.
 // If your monitor does not run at 60Hz, or something close to it, disable VSync,
 // and leave this at its default.
-#if defined(RARCH_CONSOLE)
+#if defined(__QNX__)
+static const float refresh_rate = 59.98;
+#elif defined(RARCH_CONSOLE)
 static const float refresh_rate = 59.94; 
 #else
 static const float refresh_rate = 59.95; 
@@ -316,7 +322,7 @@ static const bool allow_rotate = true;
 static const bool audio_enable = true;
 
 // Output samplerate
-static const unsigned out_rate = 48000; 
+static const unsigned out_rate = 48000;
 
 // Audio device (e.g. hw:0,0 or /dev/audio). If NULL, will use defaults.
 static const char *audio_device = NULL;
@@ -335,7 +341,11 @@ static const bool rate_control = false;
 #endif
 
 // Rate control delta. Defines how much rate_control is allowed to adjust input rate.
+#if defined(__QNX__)
+static const float rate_control_delta = 0.000;
+#else
 static const float rate_control_delta = 0.005;
+#endif
 
 // Default audio volume in dB. (0.0 dB == unity gain).
 static const float audio_volume = 0.0;
@@ -379,10 +389,16 @@ static const bool savestate_auto_load = true;
 // Slowmotion ratio.
 static const float slowmotion_ratio = 3.0;
 
+// Maximum fast forward ratio (Negative => no limit).
+static const float fastforward_ratio = -1.0;
+
 // Enable stdin/network command interface
 static const bool network_cmd_enable = false;
 static const uint16_t network_cmd_port = 55355;
 static const bool stdin_cmd_enable = false;
+
+// Number of entries that will be kept in ROM history file.
+static const unsigned game_history_size = 100;
 
 
 ////////////////////

@@ -8,6 +8,8 @@
 
 #include <screen/screen.h>
 #include <sys/neutrino.h>
+#include "ButtonMap.h"
+#include "../../../core_info.h"
 
 using namespace bb::cascades;
 
@@ -32,7 +34,9 @@ public:
     ~ RetroArch();
 
     Q_INVOKABLE void startEmulator();
-    Q_INVOKABLE void findCores();
+    Q_INVOKABLE void findDevices();
+    Q_INVOKABLE void discoverController(int player);
+    void populateCores(core_info_list_t * info);
 
 signals:
 	void romChanged(QString);
@@ -67,21 +71,26 @@ private:
 	int chid, coid;
 	int state;
 	DropDown *coreSelection;
+	DropDown *deviceSelection;
 	QVariantMap coreInfo;
 	char **coreList;
 	int coreSelectedIndex;
+	core_info_list_t *core_info_list;
+
+	ButtonMap *buttonMap;
 };
 
 enum {
 	RETROARCH_RUNNING,
 	RETROARCH_START_REQUESTED,
+	RETROARCH_BUTTON_MAP,
 	RETROARCH_EXIT
 };
 
 
 typedef union {
 	_pulse pulse;
-	int code;
+   int code;
 } recv_msg;
 
 #endif

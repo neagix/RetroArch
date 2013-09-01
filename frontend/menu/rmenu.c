@@ -57,35 +57,6 @@ struct texture_image *menu_texture;
 struct texture_image *menu_panel;
 #endif
 
-static const struct retro_keybind _rmenu_nav_binds[] = {
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_UP) | (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_UP), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_DOWN) | (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_DOWN), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_LEFT) | (1ULL << RARCH_ANALOG_LEFT_X_DPAD_LEFT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_RIGHT) | (1ULL << RARCH_ANALOG_LEFT_X_DPAD_RIGHT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_UP), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_DOWN), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_LEFT_X_DPAD_LEFT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_LEFT_X_DPAD_RIGHT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_RIGHT_Y_DPAD_UP), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_RIGHT_Y_DPAD_DOWN), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_RIGHT_X_DPAD_LEFT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_RIGHT_X_DPAD_RIGHT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_B), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_A), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_X), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_Y), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_START), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_SELECT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_L), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_R), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_L2), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_R2), 0 },
-};
-
-static const struct retro_keybind *rmenu_nav_binds[] = {
-   _rmenu_nav_binds
-};
-
 const char drive_mappings[][32] = {
 #if defined(_XBOX1)
    "C:",
@@ -350,33 +321,33 @@ static void display_menubar(uint8_t menu_type)
          strlcpy(title, "Menu", sizeof(title));
          break;
       case INGAME_MENU_CORE_OPTIONS:
-         strlcpy(title, "Core Options", sizeof(title));
+         strlcpy(title, "Core", sizeof(title));
          break;
       case INGAME_MENU_LOAD_GAME_HISTORY:
          strlcpy(title, "History", sizeof(title));
          break;
       case INGAME_MENU_VIDEO_OPTIONS:
       case INGAME_MENU_VIDEO_OPTIONS_MODE:
-         strlcpy(title, "Video Options", sizeof(title));
+         strlcpy(title, "Video", sizeof(title));
          break;
 #ifdef HAVE_SHADER_MANAGER
       case INGAME_MENU_SHADER_OPTIONS:
       case INGAME_MENU_SHADER_OPTIONS_MODE:
-         strlcpy(title, "Shader Options", sizeof(title));
+         strlcpy(title, "Shader", sizeof(title));
          break;
 #endif
       case INGAME_MENU_INPUT_OPTIONS:
       case INGAME_MENU_INPUT_OPTIONS_MODE:
-         strlcpy(title, "Input Options", sizeof(title));
+         strlcpy(title, "Input", sizeof(title));
          break;
       case INGAME_MENU_CUSTOM_RATIO:
-         strlcpy(title, "Resize Menu", sizeof(title));
+         strlcpy(title, "Resize", sizeof(title));
          break;
       case INGAME_MENU_SCREENSHOT:
          strlcpy(title, "Menu", sizeof(title));
          break;
       case FILE_BROWSER_MENU:
-         strlcpy(title, "Filebrowser", sizeof(title));
+         strlcpy(title, "Game", sizeof(title));
          break;
       case INGAME_MENU_SETTINGS:
       case INGAME_MENU_SETTINGS_MODE:
@@ -384,11 +355,11 @@ static void display_menubar(uint8_t menu_type)
          break;
       case INGAME_MENU_AUDIO_OPTIONS:
       case INGAME_MENU_AUDIO_OPTIONS_MODE:
-         strlcpy(title, "Audio Options", sizeof(title));
+         strlcpy(title, "Audio", sizeof(title));
          break;
       case INGAME_MENU_PATH_OPTIONS:
       case INGAME_MENU_PATH_OPTIONS_MODE:
-         strlcpy(title, "Path Options", sizeof(title));
+         strlcpy(title, "Path", sizeof(title));
          break;
    }
 
@@ -489,7 +460,6 @@ static int select_file(void *data, uint64_t input)
    char extensions[128];
    char comment[128];
    char path[PATH_MAX];
-   bool ret = true;
    bool pop_menu_stack = false;
    font_params_t font_parms = {0};
 
@@ -524,7 +494,7 @@ static int select_file(void *data, uint64_t input)
    if (input & (1ULL << DEVICE_NAV_B))
    {
       if (filebrowser_iterate(rgui->browser, FILEBROWSER_ACTION_PATH_ISDIR))
-         ret = filebrowser_iterate(rgui->browser, FILEBROWSER_ACTION_OK);
+         filebrowser_iterate(rgui->browser, FILEBROWSER_ACTION_OK);
       else
       {
          strlcpy(path, rgui->browser->current_dir.path, sizeof(path));
@@ -588,21 +558,14 @@ static int select_file(void *data, uint64_t input)
                   driver.video_poke->set_texture_frame(driver.video_data, menu_texture->pixels,
                         true, menu_texture->width, menu_texture->height, 1.0f);
                break;
-         }
-
-         if (rgui->menu_type == LIBRETRO_CHOICE)
-         {
-            strlcpy(g_settings.libretro, path, sizeof(g_settings.libretro));
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN);
-            return -1;
+            case LIBRETRO_CHOICE:
+               rarch_environment_cb(RETRO_ENVIRONMENT_SET_LIBRETRO_PATH, (void*)path);
+               g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN);
+               return -1;
          }
 
          pop_menu_stack = true;
       }
-
-      if (!ret)
-         msg_queue_push(g_extern.msg_queue, "INFO - You need to restart RetroArch.", 1, 180);
    }
    else if ((input & (1ULL << DEVICE_NAV_X)) || (input & (1ULL << DEVICE_NAV_MENU)))
       pop_menu_stack = true;
@@ -772,7 +735,7 @@ static bool osk_callback_enter_rsound(void *data)
    return false;
 
 do_exit:
-   g_extern.lifecycle_mode_state &= ~((1ULL << MODE_OSK_DRAW) | (1ULL << MODE_OSK_ENTRY_SUCCESS) |
+   g_extern.lifecycle_mode_state &= ~((1ULL << MODE_OSK_ENTRY_SUCCESS) |
          (1ULL << MODE_OSK_ENTRY_FAIL));
    return true;
 }
@@ -801,9 +764,16 @@ static bool osk_callback_enter_filename(void *data)
          case CONFIG_FILE:
             break;
          case SHADER_PRESET_FILE:
-            snprintf(filepath, sizeof(filepath), "%s/%s.cgp", g_settings.video.shader_dir, tmp_str);
-            RARCH_LOG("[osk_callback_enter_filename]: filepath is: %s.\n", filepath);
-            /* TODO - stub */
+            {
+               snprintf(filepath, sizeof(filepath), "%s/%s.cgp", g_settings.video.shader_dir, tmp_str);
+               RARCH_LOG("[osk_callback_enter_filename]: filepath is: %s.\n", filepath);
+               config_file_t *conf = config_file_new(NULL);
+               if (!conf)
+                  return false;
+               gfx_shader_write_conf_cgp(conf, &rgui->shader);
+               config_file_write(conf, filepath);
+               config_file_free(conf);
+            }
             break;
          case INPUT_PRESET_FILE:
             snprintf(filepath, sizeof(filepath), "%s/%s.cfg", default_paths.input_presets_dir, tmp_str);
@@ -819,7 +789,7 @@ static bool osk_callback_enter_filename(void *data)
 
    return false;
 do_exit:
-   g_extern.lifecycle_mode_state &= ~((1ULL << MODE_OSK_DRAW) | (1ULL << MODE_OSK_ENTRY_SUCCESS) |
+   g_extern.lifecycle_mode_state &= ~((1ULL << MODE_OSK_ENTRY_SUCCESS) |
          (1ULL << MODE_OSK_ENTRY_FAIL));
    return true;
 }
@@ -850,8 +820,6 @@ static void rgui_init_textures(void)
 
 static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t input)
 {
-   DEVICE_CAST device_ptr = (DEVICE_CAST)driver.video_data;
-
    switch (switchvalue)
    {
 #ifdef __CELLOS_LV2__
@@ -871,7 +839,6 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
             {
                g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_PAL_ENABLE);
                g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_PAL_TEMPORAL_ENABLE);
-               g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_PAL_VSYNC_BLOCK);
             }
 
 
@@ -887,12 +854,10 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
                if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_PAL_TEMPORAL_ENABLE))
                {
                   g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_PAL_TEMPORAL_ENABLE);
-                  g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_PAL_VSYNC_BLOCK);
                }
                else
                {
                   g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_PAL_TEMPORAL_ENABLE);
-                  g_extern.lifecycle_mode_state |= (1ULL << MODE_VIDEO_PAL_VSYNC_BLOCK);
                }
 
                driver.video->restart();
@@ -905,7 +870,6 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
             if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_PAL_ENABLE))
             {
                g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_PAL_TEMPORAL_ENABLE);
-               g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_PAL_VSYNC_BLOCK);
 
                driver.video->restart();
                rgui_init_textures();
@@ -1025,24 +989,6 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
             driver_set_monitor_refresh_rate(g_settings.video.refresh_rate);
          }
          break;
-      case SETTING_THROTTLE_MODE:
-         if ((input & (1ULL << DEVICE_NAV_LEFT)) || (input & (1ULL << DEVICE_NAV_RIGHT)) || (input & (1ULL << DEVICE_NAV_B)))
-         {
-            if (!(g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_PAL_VSYNC_BLOCK)))
-            {
-               settings_set(1ULL << S_THROTTLE);
-               device_ptr->ctx_driver->swap_interval((g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_THROTTLE_ENABLE)) ? true : false);
-            }
-         }
-         if (input & (1ULL << DEVICE_NAV_START))
-         {
-            if (!(g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_PAL_VSYNC_BLOCK)))
-            {
-               settings_set(1ULL << S_DEF_THROTTLE);
-               device_ptr->ctx_driver->swap_interval((g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_THROTTLE_ENABLE)) ? true : false);
-            }
-         }
-         break;
       case SETTING_TRIPLE_BUFFERING:
          if ((input & (1ULL << DEVICE_NAV_LEFT)) || (input & (1ULL << DEVICE_NAV_RIGHT)) || (input & (1ULL << DEVICE_NAV_B)))
          {
@@ -1060,11 +1006,6 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
                driver.video->restart();
                rgui_init_textures();
             }
-         }
-         break;
-      case SETTING_DEFAULT_VIDEO_ALL:
-         if (input & (1ULL << DEVICE_NAV_START))
-         {
          }
          break;
       case SETTING_SOUND_MODE:
@@ -1108,8 +1049,6 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
             strlcpy(g_settings.audio.device, "0.0.0.0", sizeof(g_settings.audio.device));
          break;
 #endif
-      case SETTING_DEFAULT_AUDIO_ALL:
-         break;
       case SETTING_EMU_SHOW_DEBUG_INFO_MSG:
          if ((input & (1ULL << DEVICE_NAV_LEFT)) || (input & (1ULL << DEVICE_NAV_RIGHT)) || (input & (1ULL << DEVICE_NAV_B)))
             settings_set(1ULL << S_INFO_DEBUG_MSG_TOGGLE);
@@ -1122,7 +1061,7 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
          if (input & (1ULL << DEVICE_NAV_START))
             settings_set(1ULL << S_DEF_INFO_MSG);
          break;
-      case INGAME_MENU_REWIND_ENABLED:
+      case SETTING_REWIND_ENABLED:
          if ((input & (1ULL << DEVICE_NAV_LEFT)) || (input & (1ULL << DEVICE_NAV_RIGHT)) || (input & (1ULL << DEVICE_NAV_B)))
          {
             settings_set(1ULL << S_REWIND);
@@ -1142,7 +1081,7 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
             }
          }
          break;
-      case INGAME_MENU_REWIND_GRANULARITY:
+      case SETTING_REWIND_GRANULARITY:
          if (input & (1ULL << DEVICE_NAV_LEFT))
          {
             if (g_settings.rewind_granularity > 1)
@@ -1252,18 +1191,6 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
 
          if (input & (1ULL << DEVICE_NAV_START))
             strlcpy(g_settings.system_directory, default_paths.system_dir, sizeof(g_settings.system_directory));
-         break;
-      case SETTING_PATH_DEFAULT_ALL:
-         if ((input & (1ULL << DEVICE_NAV_LEFT)) || (input & (1ULL << DEVICE_NAV_RIGHT)) || (input & (1ULL << DEVICE_NAV_B)) || (input & (1ULL << DEVICE_NAV_START)))
-         {
-            strlcpy(g_settings.rgui_browser_directory, default_paths.filebrowser_startup_dir,
-                  sizeof(g_settings.rgui_browser_directory));
-            strlcpy(g_extern.savestate_dir, default_paths.port_dir, sizeof(g_extern.savestate_dir));
-#ifdef HAVE_XML
-            strlcpy(g_settings.cheat_database, default_paths.port_dir, sizeof(g_settings.cheat_database));
-#endif
-            strlcpy(g_extern.savefile_dir, "", sizeof(g_extern.savefile_dir));
-         }
          break;
       case SETTING_CONTROLS_SCHEME:
          if ((input & (1ULL << DEVICE_NAV_LEFT)) || (input & (1ULL << DEVICE_NAV_RIGHT)) || (input & (1ULL << DEVICE_NAV_B)) || (input & (1ULL << DEVICE_NAV_START)))
@@ -1516,7 +1443,6 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
          {
             g_extern.lifecycle_mode_state &= ~(1ULL << MODE_GAME);
             g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_INGAME_EXIT);
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
             g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN);
             g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN_MULTIMAN);
             return -1;
@@ -1527,7 +1453,6 @@ static int set_setting_action(uint8_t menu_type, unsigned switchvalue, uint64_t 
          if (input & (1ULL << DEVICE_NAV_B))
          {
             g_extern.lifecycle_mode_state &= ~(1ULL << MODE_GAME);
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
             g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_INGAME_EXIT);
             return -1;
          }
@@ -1868,20 +1793,10 @@ static int select_setting(void *data, uint64_t input)
             snprintf(setting_text, sizeof(setting_text), "%fHz", g_settings.video.refresh_rate);
             strlcpy(comment, "INFO - Adjust or decrease [Refresh Rate].", sizeof(comment));
             break;
-         case SETTING_THROTTLE_MODE:
-            strlcpy(text, "Throttle Mode", sizeof(text));
-            snprintf(setting_text, sizeof(setting_text), (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_THROTTLE_ENABLE)) ? "ON" : "OFF");
-            snprintf(comment, sizeof(comment), (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_THROTTLE_ENABLE)) ? "INFO - [Throttle Mode] is 'ON' - Vsync is enabled." : "INFO - [Throttle Mode] is 'OFF' - Vsync is disabled.");
-            break;
          case SETTING_TRIPLE_BUFFERING:
             strlcpy(text, "Triple Buffering", sizeof(text));
             snprintf(setting_text, sizeof(setting_text), (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_TRIPLE_BUFFERING_ENABLE)) ? "ON" : "OFF");
             snprintf(comment, sizeof(comment), (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_TRIPLE_BUFFERING_ENABLE)) ? "INFO - [Triple Buffering] is set to 'ON'." : "INFO - [Triple Buffering] is set to 'OFF'.");
-            break;
-         case SETTING_DEFAULT_VIDEO_ALL:
-            strlcpy(text, "DEFAULTS", sizeof(text));
-            strlcpy(setting_text, "", sizeof(setting_text));
-            strlcpy(comment, "INFO - Reset all these settings.", sizeof(comment));
             break;
          case SETTING_SOUND_MODE:
             strlcpy(text, "Sound Output", sizeof(text));
@@ -1914,12 +1829,6 @@ static int select_setting(void *data, uint64_t input)
             strlcpy(comment, "INFO - Enter the IP Address of the [RSound Audio Server]. IP address\nmust be an IPv4 32-bits address, eg: '192.168.1.7'.", sizeof(comment));
             break;
 #endif
-         case SETTING_DEFAULT_AUDIO_ALL:
-            strlcpy(text, "DEFAULTS", sizeof(text));
-            strlcpy(setting_text, "", sizeof(setting_text));
-            strlcpy(comment, "INFO - Reset all these settings.", sizeof(comment));
-            break;
-            /* emu-specific */
          case SETTING_EMU_SHOW_DEBUG_INFO_MSG:
             strlcpy(text, "Debug Info Messages", sizeof(text));
             snprintf(setting_text, sizeof(setting_text), (g_extern.lifecycle_mode_state & (1ULL << MODE_FPS_DRAW)) ? "ON" : "OFF");
@@ -1930,7 +1839,7 @@ static int select_setting(void *data, uint64_t input)
             snprintf(setting_text, sizeof(setting_text), (g_extern.lifecycle_mode_state & (1ULL << MODE_INFO_DRAW)) ? "ON" : "OFF");
             strlcpy(comment, "INFO - Show onscreen info messages in the menu.", sizeof(comment));
             break;
-         case INGAME_MENU_REWIND_ENABLED:
+         case SETTING_REWIND_ENABLED:
             strlcpy(text, "Rewind", sizeof(text));
             if (g_settings.rewind_enable)
             {
@@ -1945,7 +1854,7 @@ static int select_setting(void *data, uint64_t input)
                      sizeof(comment));
             }
             break;
-         case INGAME_MENU_REWIND_GRANULARITY:
+         case SETTING_REWIND_GRANULARITY:
             strlcpy(text, "Rewind Granularity", sizeof(text));
             snprintf(setting_text, sizeof(setting_text), "%d", g_settings.rewind_granularity);
             strlcpy(comment, "INFO - Set the amount of frames to 'rewind'.", sizeof(comment));
@@ -2006,8 +1915,8 @@ static int select_setting(void *data, uint64_t input)
             strlcpy(comment, "INFO - Set the default [System directory] path.", sizeof(comment));
             break;
          case SETTING_CONTROLS_SCHEME:
-            strlcpy(text, "Control Scheme Preset", sizeof(text));
-            snprintf(comment, sizeof(comment), "INFO - Input scheme preset [%s] is selected.", g_extern.input_config_path);
+            strlcpy(text, "Load Controls Preset", sizeof(text));
+            snprintf(comment, sizeof(comment), "INFO - Controls preset [%s] is selected.", g_extern.input_config_path);
             strlcpy(setting_text, g_extern.input_config_path, sizeof(setting_text));
             break;
          case SETTING_CONTROLS_NUMBER:
@@ -2063,7 +1972,7 @@ static int select_setting(void *data, uint64_t input)
             }
             break;
          case SETTING_CONTROLS_SAVE_CUSTOM_CONTROLS:
-            strlcpy(text, "SAVE CUSTOM CONTROLS", sizeof(text));
+            strlcpy(text, "Save Controls Preset", sizeof(text));
             strlcpy(setting_text, "", sizeof(setting_text));
             strlcpy(comment, "INFO - Save the [Custom Controls] settings to file.",  sizeof(comment));
             break;
@@ -2071,11 +1980,6 @@ static int select_setting(void *data, uint64_t input)
             strlcpy(text, "DEFAULTS", sizeof(text));
             strlcpy(setting_text, "", sizeof(setting_text));
             strlcpy(comment, "INFO - Set all Controls settings to defaults.", sizeof(comment));
-            break;
-         case SETTING_PATH_DEFAULT_ALL:
-            strlcpy(text, "DEFAULTS", sizeof(text));
-            strlcpy(setting_text, "", sizeof(setting_text));
-            strlcpy(comment, "INFO - Set all Path settings to defaults.", sizeof(comment));
             break;
          case INGAME_MENU_LOAD_STATE:
             strlcpy(text, "Load State", sizeof(text));
@@ -2395,7 +2299,10 @@ static int select_rom(void *data, uint64_t input)
          bool ret = filebrowser_iterate(rgui->browser, FILEBROWSER_ACTION_OK);
 
          if (!ret)
+         {
+            RARCH_ERR("Failed to open directory.\n");
             msg_queue_push(g_extern.msg_queue, "ERROR - Failed to open directory.", 1, 180);
+         }
       }
       else
       {
@@ -2587,16 +2494,18 @@ static int ingame_menu_resize(void *data, uint64_t input)
 
       display_menubar(rgui->menu_type);
 
+      char viewport_buf[256];
       snprintf(viewport, sizeof(viewport), "Viewport X: #%d Y: %d (%dx%d)", g_extern.console.screen.viewports.custom_vp.x, g_extern.console.screen.viewports.custom_vp.y, g_extern.console.screen.viewports.custom_vp.width,
             g_extern.console.screen.viewports.custom_vp.height);
+      menu_ticker_line(viewport_buf, TICKER_LABEL_CHARS_MAX_PER_LINE, g_extern.frame_count / 15, viewport, true);
 
       font_parms.x = POSITION_X; 
       font_parms.y = POSITION_Y_BEGIN;
       font_parms.scale = HARDCODE_FONT_SIZE;
-      font_parms.color = GREEN;
+      font_parms.color = WHITE;
 
       if (driver.video_poke->set_osd_msg)
-         driver.video_poke->set_osd_msg(driver.video_data, viewport, &font_parms);
+         driver.video_poke->set_osd_msg(driver.video_data, viewport_buf, &font_parms);
 
       snprintf(msg, sizeof(msg), "[%s]", key_label_dpad_left.desc);
 
@@ -2772,7 +2681,7 @@ static int ingame_menu_history_options(void *data, uint64_t input)
    if (history_size)
    {
       size_t opts = history_size;
-      for (size_t i = 0; i < opts; i++, font_parms.y += POSITION_Y_INCREMENT)
+      for (size_t i = 0; i < opts; i++)
       {
          const char *path = NULL;
          const char *core_path = NULL;
@@ -2791,7 +2700,7 @@ static int ingame_menu_history_options(void *data, uint64_t input)
          /* not on same page? */
          if ((i / NUM_ENTRY_PER_PAGE) != (hist_opt_selected / NUM_ENTRY_PER_PAGE))
             continue;
-
+         
 #ifdef HAVE_MENU_PANEL
          //check if this is the currently selected option
          if (i == hist_opt_selected)
@@ -2804,6 +2713,8 @@ static int ingame_menu_history_options(void *data, uint64_t input)
          if (driver.video_poke->set_osd_msg)
             driver.video_poke->set_osd_msg(driver.video_data,
                   fill_buf, &font_parms);
+
+         font_parms.y += POSITION_Y_INCREMENT;
       }
 
       if ((input & (1ULL << DEVICE_NAV_START)) ||
@@ -2973,10 +2884,7 @@ int rgui_input_postprocess(void *data, uint64_t old_state)
    device_ptr->ctx_driver->check_window(&quit, &resize, &width, &height, frame_count);
 
    if (quit)
-   {
-      g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
       ret = -1;
-   }
 
    if (g_extern.lifecycle_mode_state & (1ULL << MODE_MENU_INGAME_EXIT))
    {
@@ -3115,36 +3023,4 @@ void rgui_free(rgui_handle_t *rgui)
       menu_texture->pixels = NULL;
    }
 #endif
-}
-
-uint64_t rgui_input(void)
-{
-   uint64_t input_state = 0;
-
-   for (unsigned i = 0; i < (DEVICE_NAV_LAST - 1); i++)
-      input_state |= driver.input->input_state(driver.input_data, rmenu_nav_binds, 0,
-            RETRO_DEVICE_JOYPAD, 0, i) ? (1ULL << i) : 0;
-
-   input_state |= driver.input->key_pressed(driver.input_data, RARCH_MENU_TOGGLE) ? (1ULL << DEVICE_NAV_MENU) : 0;
-
-   //set first button input frame as trigger
-   rgui->trigger_state = input_state & ~rgui->old_input_state;
-
-   bool keys_pressed = (input_state & (
-            (1ULL << DEVICE_NAV_LEFT_ANALOG_L) |
-            (1ULL << DEVICE_NAV_RIGHT_ANALOG_L) |
-            (1ULL << DEVICE_NAV_UP_ANALOG_L) |
-            (1ULL << DEVICE_NAV_DOWN_ANALOG_L) |
-            (1ULL << DEVICE_NAV_LEFT_ANALOG_R) |
-            (1ULL << DEVICE_NAV_RIGHT_ANALOG_R) |
-            (1ULL << DEVICE_NAV_UP_ANALOG_R) |
-            (1ULL << DEVICE_NAV_DOWN_ANALOG_R)));
-   bool shoulder_buttons_pressed = (input_state & (
-            (1ULL << DEVICE_NAV_L2) |
-            (1ULL << DEVICE_NAV_R2)
-            ));
-   rgui->do_held = (keys_pressed || shoulder_buttons_pressed) &&
-   !(input_state & DEVICE_NAV_MENU);
-
-   return input_state;
 }

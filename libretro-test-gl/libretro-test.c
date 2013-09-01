@@ -8,100 +8,33 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 static struct retro_hw_render_callback hw_render;
 
-#define GL_GLEXT_PROTOTYPES
-#if defined(GLES)
-#ifdef IOS
-#include <OpenGLES/ES2/gl.h>
+#include "../gfx/glsym/glsym.h"
+
+#define BASE_WIDTH 320
+#define BASE_HEIGHT 240
+#ifdef GLES
+#define MAX_WIDTH 1024
+#define MAX_HEIGHT 1024
 #else
-#include <GLES2/gl2.h>
-#endif
-#elif defined(__APPLE__)
-#include <OpenGL/gl.h>
-#include <OpenGL/glext.h>
-#else
-#include <GL/gl.h>
-#include <GL/glext.h>
+#define MAX_WIDTH 1920
+#define MAX_HEIGHT 1600
 #endif
 
-#if defined(GLES) || defined(__APPLE__)
-#define pglCreateProgram glCreateProgram
-#define pglCreateShader glCreateShader
-#define pglCompileShader glCompileShader
-#define pglUseProgram glUseProgram
-#define pglShaderSource glShaderSource
-#define pglAttachShader glAttachShader
-#define pglLinkProgram glLinkProgram
-#define pglBindFramebuffer glBindFramebuffer
-#define pglGetUniformLocation glGetUniformLocation
-#define pglUniformMatrix4fv glUniformMatrix4fv
-#define pglGetAttribLocation glGetAttribLocation
-#define pglVertexAttribPointer glVertexAttribPointer
-#define pglEnableVertexAttribArray glEnableVertexAttribArray
-#define pglDisableVertexAttribArray glDisableVertexAttribArray
-#define pglGenBuffers glGenBuffers
-#define pglBufferData glBufferData
-#define pglBindBuffer glBindBuffer
-#define init_gl_proc()
-#else
-static PFNGLCREATEPROGRAMPROC pglCreateProgram;
-static PFNGLCREATESHADERPROC pglCreateShader;
-static PFNGLCREATESHADERPROC pglCompileShader;
-static PFNGLCREATESHADERPROC pglUseProgram;
-static PFNGLSHADERSOURCEPROC pglShaderSource;
-static PFNGLATTACHSHADERPROC pglAttachShader;
-static PFNGLLINKPROGRAMPROC pglLinkProgram;
-static PFNGLBINDFRAMEBUFFERPROC pglBindFramebuffer;
-static PFNGLGETUNIFORMLOCATIONPROC pglGetUniformLocation;
-static PFNGLUNIFORMMATRIX4FVPROC pglUniformMatrix4fv;
-static PFNGLGETATTRIBLOCATIONPROC pglGetAttribLocation;
-static PFNGLVERTEXATTRIBPOINTERPROC pglVertexAttribPointer;
-static PFNGLENABLEVERTEXATTRIBARRAYPROC pglEnableVertexAttribArray;
-static PFNGLDISABLEVERTEXATTRIBARRAYPROC pglDisableVertexAttribArray;
-static PFNGLGENBUFFERSPROC pglGenBuffers;
-static PFNGLBUFFERDATAPROC pglBufferData;
-static PFNGLBINDBUFFERPROC pglBindBuffer;
-
-struct gl_proc_map
-{
-   void *proc;
-   const char *sym;
-};
-
-#define PROC_BIND(name) { &(pgl##name), "gl" #name }
-static const struct gl_proc_map proc_map[] = {
-   PROC_BIND(CreateProgram),
-   PROC_BIND(CreateShader),
-   PROC_BIND(CompileShader),
-   PROC_BIND(UseProgram),
-   PROC_BIND(ShaderSource),
-   PROC_BIND(AttachShader),
-   PROC_BIND(LinkProgram),
-   PROC_BIND(BindFramebuffer),
-   PROC_BIND(GetUniformLocation),
-   PROC_BIND(GetAttribLocation),
-   PROC_BIND(UniformMatrix4fv),
-   PROC_BIND(VertexAttribPointer),
-   PROC_BIND(EnableVertexAttribArray),
-   PROC_BIND(DisableVertexAttribArray),
-   PROC_BIND(GenBuffers),
-   PROC_BIND(BufferData),
-   PROC_BIND(BindBuffer),
-};
-
-static void init_gl_proc(void)
-{
-   for (unsigned i = 0; i < ARRAY_SIZE(proc_map); i++)
-   {
-      retro_proc_address_t proc = hw_render.get_proc_address(proc_map[i].sym);
-      if (!proc)
-         fprintf(stderr, "Symbol %s not found!\n", proc_map[i].sym);
-      memcpy(proc_map[i].proc, &proc, sizeof(proc));
-   }
-}
-#endif
+static unsigned width = BASE_WIDTH;
+static unsigned height = BASE_HEIGHT;
 
 static GLuint prog;
 static GLuint vbo;
+
+#ifdef CORE
+static bool context_alive;
+static bool multisample_fbo;
+static unsigned multisample;
+static GLuint vao;
+
+static GLuint fbo;
+static GLuint rbo_color, rbo_depth_stencil;
+#endif
 
 static const GLfloat vertex_data[] = {
    -0.5, -0.5,
@@ -114,6 +47,28 @@ static const GLfloat vertex_data[] = {
    1.0, 0.0, 1.0, 1.0,
 };
 
+#ifdef CORE
+static const char *vertex_shader[] = {
+   "#version 140\n"
+   "uniform mat4 uMVP;",
+   "in vec2 aVertex;",
+   "in vec4 aColor;",
+   "out vec4 color;",
+   "void main() {",
+   "  gl_Position = uMVP * vec4(aVertex, 0.0, 1.0);",
+   "  color = aColor;",
+   "}",
+};
+
+static const char *fragment_shader[] = {
+   "#version 140\n"
+   "in vec4 color;",
+   "out vec4 FragColor;\n"
+   "void main() {",
+   "  FragColor = color;",
+   "}",
+};
+#else
 static const char *vertex_shader[] = {
    "uniform mat4 uMVP;",
    "attribute vec2 aVertex;",
@@ -134,33 +89,97 @@ static const char *fragment_shader[] = {
    "  gl_FragColor = color;",
    "}",
 };
+#endif
 
 static void compile_program(void)
 {
-   prog = pglCreateProgram();
-   GLuint vert = pglCreateShader(GL_VERTEX_SHADER);
-   GLuint frag = pglCreateShader(GL_FRAGMENT_SHADER);
+   prog = glCreateProgram();
+   GLuint vert = glCreateShader(GL_VERTEX_SHADER);
+   GLuint frag = glCreateShader(GL_FRAGMENT_SHADER);
 
-   pglShaderSource(vert, ARRAY_SIZE(vertex_shader), vertex_shader, 0);
-   pglShaderSource(frag, ARRAY_SIZE(fragment_shader), fragment_shader, 0);
-   pglCompileShader(vert);
-   pglCompileShader(frag);
+   glShaderSource(vert, ARRAY_SIZE(vertex_shader), vertex_shader, 0);
+   glShaderSource(frag, ARRAY_SIZE(fragment_shader), fragment_shader, 0);
+   glCompileShader(vert);
+   glCompileShader(frag);
 
-   pglAttachShader(prog, vert);
-   pglAttachShader(prog, frag);
-   pglLinkProgram(prog);
+   glAttachShader(prog, vert);
+   glAttachShader(prog, frag);
+   glLinkProgram(prog);
+   glDeleteShader(vert);
+   glDeleteShader(frag);
 }
+
+#ifdef CORE
+static void init_multisample(unsigned samples)
+{
+   multisample = samples;
+   if (!context_alive)
+      return;
+
+   if (rbo_color)
+      glDeleteRenderbuffers(1, &rbo_color);
+   if (rbo_depth_stencil)
+      glDeleteRenderbuffers(1, &rbo_depth_stencil);
+   if (fbo)
+      glDeleteFramebuffers(1, &fbo);
+
+   rbo_color = rbo_depth_stencil = fbo = 0;
+   multisample_fbo = false;
+   if (samples <= 1)
+      return;
+
+   if (glRenderbufferStorageMultisample)
+   {
+      glGenRenderbuffers(1, &rbo_color);
+      glGenRenderbuffers(1, &rbo_depth_stencil);
+      glGenFramebuffers(1, &fbo);
+
+      glBindRenderbuffer(GL_RENDERBUFFER, rbo_color);
+      glRenderbufferStorageMultisample(GL_RENDERBUFFER,
+            samples, GL_RGBA, MAX_WIDTH, MAX_HEIGHT);
+      glBindRenderbuffer(GL_RENDERBUFFER, rbo_depth_stencil);
+      glRenderbufferStorageMultisample(GL_RENDERBUFFER,
+            samples, GL_DEPTH24_STENCIL8, MAX_WIDTH, MAX_HEIGHT);
+      glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+      glGenFramebuffers(1, &fbo);
+      glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+            GL_RENDERBUFFER, rbo_color);
+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+            GL_RENDERBUFFER, rbo_depth_stencil);
+
+      GLenum ret = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+      if (ret == GL_FRAMEBUFFER_COMPLETE)
+      {
+         fprintf(stderr, "Using multisampled FBO.\n");
+         multisample_fbo = true;
+      }
+      else
+         fprintf(stderr, "Multisampled FBO failed.\n");
+
+      glBindFramebuffer(GL_FRAMEBUFFER, 0);
+   }
+   else
+      fprintf(stderr, "Multisampled FBOs not supported.\n");
+}
+#endif
 
 static void setup_vao(void)
 {
-   pglUseProgram(prog);
+#ifdef CORE
+   glGenVertexArrays(1, &vao);
+#endif
 
-   pglGenBuffers(1, &vbo);
-   pglBindBuffer(GL_ARRAY_BUFFER, vbo);
-   pglBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
+   glUseProgram(prog);
 
-   pglBindBuffer(GL_ARRAY_BUFFER, 0);
-   pglUseProgram(0);
+   glGenBuffers(1, &vbo);
+   glBindBuffer(GL_ARRAY_BUFFER, vbo);
+   glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
+
+   glBindBuffer(GL_ARRAY_BUFFER, 0);
+   glUseProgram(0);
 }
 
 void retro_init(void)
@@ -197,10 +216,10 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
    };
 
    info->geometry = (struct retro_game_geometry) {
-      .base_width   = 512,
-      .base_height  = 512,
-      .max_width    = 512,
-      .max_height   = 512,
+      .base_width   = BASE_WIDTH,
+      .base_height  = BASE_HEIGHT,
+      .max_width    = MAX_WIDTH,
+      .max_height   = MAX_HEIGHT,
       .aspect_ratio = 4.0 / 3.0,
    };
 }
@@ -216,8 +235,24 @@ void retro_set_environment(retro_environment_t cb)
 {
    environ_cb = cb;
 
+   struct retro_variable variables[] = {
+      {
+         "testgl_resolution",
+#ifdef GLES
+         "Internal resolution; 320x240|360x480|480x272|512x384|512x512|640x240|640x448|640x480|720x576|800x600|960x720|1024x768",
+#else
+         "Internal resolution; 320x240|360x480|480x272|512x384|512x512|640x240|640x448|640x480|720x576|800x600|960x720|1024x768|1024x1024|1280x720|1280x960|1600x1200|1920x1080|1920x1440|1920x1600",
+#endif
+      },
+#ifdef CORE
+      { "testgl_multisample", "Multisampling; 1x|2x|4x" },
+#endif
+      { NULL, NULL },
+   };
+
    bool no_rom = true;
    cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_rom);
+   cb(RETRO_ENVIRONMENT_SET_VARIABLES, variables);
 }
 
 void retro_set_audio_sample(retro_audio_sample_t cb)
@@ -245,29 +280,86 @@ void retro_set_video_refresh(retro_video_refresh_t cb)
    video_cb = cb;
 }
 
+static void update_variables(void)
+{
+   struct retro_variable var = {
+      .key = "testgl_resolution",
+   };
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      char *pch;
+      char str[100];
+      snprintf(str, sizeof(str), var.value);
+      
+      pch = strtok(str, "x");
+      if (pch)
+         width = strtoul(pch, NULL, 0);
+      pch = strtok(NULL, "x");
+      if (pch)
+         height = strtoul(pch, NULL, 0);
+
+      fprintf(stderr, "[libretro-test]: Got size: %u x %u.\n", width, height);
+   }
+
+#ifdef CORE
+   var.key = "testgl_multisample";
+   var.value = NULL;
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      switch (*var.value)
+      {
+         case '1':
+            init_multisample(1);
+            break;
+
+         case '2':
+            init_multisample(2);
+            break;
+
+         case '4':
+            init_multisample(4);
+            break;
+      }
+   }
+#endif
+}
+
 void retro_run(void)
 {
+   bool updated = false;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
+      update_variables();
+
    input_poll_cb();
 
-   pglBindFramebuffer(GL_FRAMEBUFFER, hw_render.get_current_framebuffer());
-   glClearColor(0.3, 0.4, 0.5, 1.0);
-   glViewport(0, 0, 512, 512);
-   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+#ifdef CORE
+   glBindVertexArray(vao);
+   if (multisample_fbo)
+      glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+   else
+#endif
+      glBindFramebuffer(GL_FRAMEBUFFER, hw_render.get_current_framebuffer());
 
-   pglUseProgram(prog);
+   glClearColor(0.3, 0.4, 0.5, 1.0);
+   glViewport(0, 0, width, height);
+   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+   glUseProgram(prog);
 
    glEnable(GL_DEPTH_TEST);
 
-   pglBindBuffer(GL_ARRAY_BUFFER, vbo);
-   int vloc = pglGetAttribLocation(prog, "aVertex");
-   pglVertexAttribPointer(vloc, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
-   pglEnableVertexAttribArray(vloc);
-   int cloc = pglGetAttribLocation(prog, "aColor");
-   pglVertexAttribPointer(cloc, 4, GL_FLOAT, GL_FALSE, 0, (void*)(8 * sizeof(GLfloat)));
-   pglEnableVertexAttribArray(cloc);
-   pglBindBuffer(GL_ARRAY_BUFFER, 0);
+   glBindBuffer(GL_ARRAY_BUFFER, vbo);
+   int vloc = glGetAttribLocation(prog, "aVertex");
+   glVertexAttribPointer(vloc, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
+   glEnableVertexAttribArray(vloc);
+   int cloc = glGetAttribLocation(prog, "aColor");
+   glVertexAttribPointer(cloc, 4, GL_FLOAT, GL_FALSE, 0, (void*)(8 * sizeof(GLfloat)));
+   glEnableVertexAttribArray(cloc);
+   glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-   int loc = pglGetUniformLocation(prog, "uMVP");
+   int loc = glGetUniformLocation(prog, "uMVP");
 
    static unsigned frame_count;
    frame_count++;
@@ -281,7 +373,7 @@ void retro_run(void)
       0, 0, 1, 0,
       0, 0, 0, 1,
    };
-   pglUniformMatrix4fv(loc, 1, GL_FALSE, mvp);
+   glUniformMatrix4fv(loc, 1, GL_FALSE, mvp);
    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
    cos_angle *= 0.5;
@@ -293,26 +385,61 @@ void retro_run(void)
       0.4, 0.4, 0.2, 1,
    };
 
-   pglUniformMatrix4fv(loc, 1, GL_FALSE, mvp2);
+   glUniformMatrix4fv(loc, 1, GL_FALSE, mvp2);
    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-   pglDisableVertexAttribArray(vloc);
-   pglDisableVertexAttribArray(cloc);
+   glDisableVertexAttribArray(vloc);
+   glDisableVertexAttribArray(cloc);
 
-   pglUseProgram(0);
+   glUseProgram(0);
 
-   video_cb(RETRO_HW_FRAME_BUFFER_VALID, 512, 512, 0);
+#ifdef CORE
+   glBindVertexArray(0);
+   if (multisample_fbo) // Resolve the multisample.
+   {
+      glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hw_render.get_current_framebuffer());
+      glBlitFramebuffer(0, 0, width, height,
+            0, 0, width, height,
+            GL_COLOR_BUFFER_BIT, GL_NEAREST);
+      glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+   }
+#endif
+   video_cb(RETRO_HW_FRAME_BUFFER_VALID, width, height, 0);
 }
 
 static void context_reset(void)
 {
    fprintf(stderr, "Context reset!\n");
-   init_gl_proc();
+   rglgen_resolve_symbols(hw_render.get_proc_address);
    compile_program();
    setup_vao();
+#ifdef CORE
+   context_alive = true;
+   init_multisample(multisample);
+#endif
+}
+
+static void context_destroy(void)
+{
+   fprintf(stderr, "Context destroy!\n");
+
+#ifdef CORE
+   glDeleteVertexArrays(1, &vao);
+   vao = 0;
+   init_multisample(0);
+   context_alive = false;
+#endif
+   glDeleteBuffers(1, &vbo);
+   vbo = 0;
+   glDeleteProgram(prog);
+   prog = 0;
 }
 
 bool retro_load_game(const struct retro_game_info *info)
 {
+   update_variables();
+
    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
    if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
    {
@@ -323,10 +450,19 @@ bool retro_load_game(const struct retro_game_info *info)
 #ifdef GLES
    hw_render.context_type = RETRO_HW_CONTEXT_OPENGLES2;
 #else
+#ifdef CORE
+   hw_render.context_type = RETRO_HW_CONTEXT_OPENGL_CORE;
+   hw_render.version_major = 3;
+   hw_render.version_minor = 1;
+#else
    hw_render.context_type = RETRO_HW_CONTEXT_OPENGL;
 #endif
+#endif
    hw_render.context_reset = context_reset;
+   hw_render.context_destroy = context_destroy;
    hw_render.depth = true;
+   hw_render.stencil = true;
+   hw_render.bottom_left_origin = true;
    if (!environ_cb(RETRO_ENVIRONMENT_SET_HW_RENDER, &hw_render))
       return false;
 

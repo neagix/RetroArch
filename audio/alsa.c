@@ -16,7 +16,7 @@
 
 #include "../driver.h"
 #include <stdlib.h>
-#include <asoundlib.h>
+#include <alsa/asoundlib.h>
 #include "../general.h"
 
 #define TRY_ALSA(x) if (x < 0) { \
@@ -26,10 +26,11 @@
 typedef struct alsa
 {
    snd_pcm_t *pcm;
+   size_t buffer_size;
    bool nonblock;
    bool has_float;
-
-   size_t buffer_size;
+   bool can_pause;
+   bool is_paused;
 } alsa_t;
 
 static bool alsa_use_float(void *data)
@@ -38,8 +39,9 @@ static bool alsa_use_float(void *data)
    return alsa->has_float;
 }
 
-static bool find_float_format(snd_pcm_t *pcm, snd_pcm_hw_params_t *params)
+static bool find_float_format(snd_pcm_t *pcm, void *data)
 {
+   snd_pcm_hw_params_t *params = (snd_pcm_hw_params_t*)data;
    if (snd_pcm_hw_params_test_format(pcm, params, SND_PCM_FORMAT_FLOAT) == 0)
    {
       RARCH_LOG("ALSA: Using floating point format.\n");
@@ -58,18 +60,18 @@ static void *alsa_init(const char *device, unsigned rate, unsigned latency)
    snd_pcm_hw_params_t *params = NULL;
    snd_pcm_sw_params_t *sw_params = NULL;
 
+   unsigned latency_usec = latency * 1000;
+   unsigned channels = 2;
+   unsigned periods = 4;
+   snd_pcm_format_t format;
+
    const char *alsa_dev = "default";
    if (device)
       alsa_dev = device;
 
-   unsigned latency_usec = latency * 1000;
-   unsigned channels = 2;
-   unsigned periods = 4;
    snd_pcm_uframes_t buffer_size;
-   snd_pcm_format_t format;
 
    TRY_ALSA(snd_pcm_open(&alsa->pcm, alsa_dev, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK));
-
    TRY_ALSA(snd_pcm_hw_params_malloc(&params));
    alsa->has_float = find_float_format(alsa->pcm, params);
    format = alsa->has_float ? SND_PCM_FORMAT_FLOAT : SND_PCM_FORMAT_S16;
@@ -90,6 +92,8 @@ static void *alsa_init(const char *device, unsigned rate, unsigned latency)
    snd_pcm_hw_params_get_buffer_size(params, &buffer_size);
    RARCH_LOG("ALSA: Buffer size: %d frames\n", (int)buffer_size);
    alsa->buffer_size = snd_pcm_frames_to_bytes(alsa->pcm, buffer_size);
+   alsa->can_pause = snd_pcm_hw_params_can_pause(params);
+   RARCH_LOG("ALSA: Can pause: %s.\n", alsa->can_pause ? "yes" : "no");
 
    TRY_ALSA(snd_pcm_sw_params_malloc(&sw_params));
    TRY_ALSA(snd_pcm_sw_params_current(alsa->pcm, sw_params));
@@ -191,7 +195,19 @@ static ssize_t alsa_write(void *data, const void *buf_, size_t size_)
 
 static bool alsa_stop(void *data)
 {
-   return true;
+   alsa_t *alsa = (alsa_t*)data;
+   if (alsa->can_pause && !alsa->is_paused)
+   {
+      if (snd_pcm_pause(alsa->pcm, 1) == 0)
+      {
+         alsa->is_paused = true;
+         return true;
+      }
+      else
+         return false;
+   }
+   else
+      return true;
 }
 
 static void alsa_set_nonblock_state(void *data, bool state)
@@ -202,7 +218,23 @@ static void alsa_set_nonblock_state(void *data, bool state)
 
 static bool alsa_start(void *data)
 {
-   return true;
+   alsa_t *alsa = (alsa_t*)data;
+   if (alsa->can_pause && alsa->is_paused)
+   {
+      int ret = snd_pcm_pause(alsa->pcm, 0);
+      if (ret < 0)
+      {
+         RARCH_ERR("[ALSA]: Failed to unpause: %s.\n", snd_strerror(ret));
+         return false;
+      }
+      else
+      {
+         alsa->is_paused = false;
+         return true;
+      }
+   }
+   else
+      return true;
 }
 
 static void alsa_free(void *data)
@@ -224,10 +256,10 @@ static size_t alsa_write_avail(void *data)
 {
    alsa_t *alsa = (alsa_t*)data;
 
-   snd_pcm_sframes_t avail = snd_pcm_avail_update(alsa->pcm);
+   snd_pcm_sframes_t avail = snd_pcm_avail(alsa->pcm);
    if (avail < 0)
    {
-      //RARCH_WARN("[ALSA]: avail_update() failed: %s\n", snd_strerror(avail));
+      //RARCH_WARN("[ALSA]: snd_pcm_avail() failed: %s\n", snd_strerror(avail));
       return alsa->buffer_size;
    }
 
@@ -252,4 +284,3 @@ const audio_driver_t audio_alsa = {
    alsa_write_avail,
    alsa_buffer_size,
 };
-

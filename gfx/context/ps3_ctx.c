@@ -24,6 +24,8 @@
 #endif
 #endif
 
+#include "../gfx_common.h"
+
 #ifndef __PSL1GHT__
 #include <sys/spu_initialize.h>
 #endif
@@ -184,7 +186,23 @@ static void gfx_ctx_swap_buffers(void)
 
 static void gfx_ctx_set_resize(unsigned width, unsigned height) { }
 
-static void gfx_ctx_update_window_title(void) { }
+static void gfx_ctx_update_window_title(void)
+{
+   gl_t *gl = (gl_t*)driver.video_data;
+   char buf[128];
+
+   if (gfx_get_fps(buf, sizeof(buf), false) &&
+   (g_extern.lifecycle_mode_state & (1ULL << MODE_FPS_DRAW)) &&
+         gl->font_ctx)
+   {
+      font_params_t params = {0};
+      params.x = g_settings.video.msg_pos_x;
+      params.y = 0.56f;
+      params.scale = 1.04f;
+      params.color = WHITE;
+      gl->font_ctx->render_msg(gl, buf, &params);
+   }
+}
 
 static void gfx_ctx_get_video_size(unsigned *width, unsigned *height)
 {
@@ -282,8 +300,10 @@ static void gfx_ctx_destroy(void)
 
 static void gfx_ctx_input_driver(const input_driver_t **input, void **input_data) { }
 
-static bool gfx_ctx_bind_api(enum gfx_ctx_api api)
+static bool gfx_ctx_bind_api(enum gfx_ctx_api api, unsigned major, unsigned minor)
 {
+   (void)major;
+   (void)minor;
    return api == GFX_CTX_OPENGL_API || GFX_CTX_OPENGL_ES_API;
 }
 

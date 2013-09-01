@@ -16,10 +16,13 @@
 #include "general.h"
 #include "conf/config_file.h"
 #include "file.h"
+#include "core_info.h"
 
 #ifdef HAVE_RGUI
 #include "frontend/menu/rgui.h"
 #endif
+
+#include "../../frontend_qnx.h"
 
 #include <bb/cascades/AbsoluteLayoutProperties>
 #include <bb/cascades/ForeignWindowControl>
@@ -29,6 +32,8 @@
 #include <bb/cascades/pickers/FilePicker>
 #include <bb/data/JsonDataAccess>
 #include <bb/device/HardwareInfo>
+#include <bb/cascades/ListView>
+
 
 #include <screen/screen.h>
 #include <bps/screen.h>
@@ -43,8 +48,8 @@ using namespace bb::cascades;
 using namespace bb::data;
 using namespace bb::device;
 
-//Use after calling findCores
-#define GET_CORE_INFO(x, y) coreInfo[coreList[x]].toMap()[y].toString()
+extern screen_window_t screen_win;
+extern screen_context_t screen_ctx;
 
 RetroArch::RetroArch()
 {
@@ -60,9 +65,14 @@ RetroArch::RetroArch()
          this, SLOT(onRotationCompleted()));
 
    rarch_main_clear_state();
+   strlcpy(g_extern.config_path, "app/native/retroarch.cfg", sizeof(g_extern.config_path));
+   config_load();
 
    strlcpy(g_settings.libretro, "app/native/lib", sizeof(g_settings.libretro));
    coreSelectedIndex = -1;
+
+   //Stop config overwritting values
+   g_extern.block_config_read = true;
 
    QmlDocument *qml = QmlDocument::create("asset:///main.qml");
 
@@ -77,9 +87,22 @@ RetroArch::RetroArch()
          //Get core DropDown reference to populate it in C++
          coreSelection = mAppPane->findChild<DropDown*>("dropdown_core");
          connect(coreSelection, SIGNAL(selectedValueChanged(QVariant)), this, SLOT(onCoreSelected(QVariant)));
-         findCores();
+         core_info_list = get_core_info_list(g_settings.libretro);
+         populateCores(core_info_list);
 
          Application::instance()->setScene(mAppPane);
+
+         screen_create_context(&screen_ctx, 0);
+         input_qnx.init();
+         buttonMap = new ButtonMap(screen_ctx, (const char*)Application::instance()->mainWindow()->groupId().toAscii().constData(), coid);
+         qml->setContextProperty("ButtonMap", buttonMap);
+
+         deviceSelection = mAppPane->findChild<DropDown*>("dropdown_devices");
+         buttonMap->deviceSelection = deviceSelection;
+         findDevices();
+
+         //Setup the datamodel for button mapping.
+         mAppPane->findChild<ListView*>("buttonMapList")->setDataModel(buttonMap->buttonDataModel);
 
          // Start the thread in which we render to the custom window.
          start();
@@ -89,7 +112,7 @@ RetroArch::RetroArch()
 
 RetroArch::~RetroArch()
 {
-   free(coreList);
+   free_core_info_list(core_info_list);
 }
 
 void RetroArch::aboutToQuit()
@@ -103,14 +126,30 @@ void RetroArch::aboutToQuit()
    wait();
 }
 
-extern screen_window_t screen_win;
-extern screen_context_t screen_ctx;
 void RetroArch::run()
 {
    int rcvid = -1;
    recv_msg msg;
 
-   while (true) {
+   bps_initialize();
+
+   if (screen_request_events(screen_ctx) != BPS_SUCCESS)
+   {
+      RARCH_ERR("screen_request_events failed.\n");
+   }
+
+   if (navigator_request_events(0) != BPS_SUCCESS)
+   {
+      RARCH_ERR("navigator_request_events failed.\n");
+   }
+
+   if (navigator_rotation_lock(false) != BPS_SUCCESS)
+   {
+      RARCH_ERR("navigator_location_lock failed.\n");
+   }
+
+   while (true)
+   {
       rcvid = MsgReceive(chid, &msg, sizeof(msg), 0);
 
       if (rcvid > 0)
@@ -119,32 +158,16 @@ void RetroArch::run()
          {
          case RETROARCH_START_REQUESTED:
          {
-            printf("RetroArch Started Received\n");fflush(stdout);
-
             MsgReply(rcvid,0,NULL,0);
 
-            screen_create_context(&screen_ctx, 0);
-
-            bps_initialize();
-
-            if (screen_request_events(screen_ctx) != BPS_SUCCESS)
+            if (screen_create_window_type(&screen_win, screen_ctx, SCREEN_CHILD_WINDOW) != BPS_SUCCESS)
             {
-               RARCH_ERR("screen_request_events failed.\n");
+               RARCH_ERR("Screen create window failed.\n");
             }
-
-            if (navigator_request_events(0) != BPS_SUCCESS)
+            if (screen_join_window_group(screen_win, (const char*)Application::instance()->mainWindow()->groupId().toAscii().constData()) != BPS_SUCCESS)
             {
-               RARCH_ERR("navigator_request_events failed.\n");
+               RARCH_ERR("Screen join window group failed.\n");
             }
-
-            if (navigator_rotation_lock(false) != BPS_SUCCESS)
-            {
-               RARCH_ERR("navigator_location_lock failed.\n");
-            }
-
-            screen_create_window_type(&screen_win, screen_ctx, SCREEN_CHILD_WINDOW);
-
-            screen_join_window_group(screen_win, Application::instance()->mainWindow()->groupId().toAscii().constData());
 
             char *win_id = "RetroArch_Emulator_Window";
             screen_set_window_property_cv(screen_win, SCREEN_PROPERTY_ID_STRING, strlen(win_id), win_id);
@@ -157,8 +180,13 @@ void RetroArch::run()
             initRASettings();
 
             rarch_main(0, NULL);
+            Application::instance()->exit();
             break;
          }
+         //The class should probably be it's own QThread, simplify things
+         case RETROARCH_BUTTON_MAP:
+            MsgReply(rcvid, buttonMap->mapNextButtonPressed(), NULL, 0);
+            break;
          case RETROARCH_EXIT:
             MsgReply(rcvid,0,NULL,0);
             goto exit;
@@ -167,7 +195,7 @@ void RetroArch::run()
          }
       }
    }
-   exit:
+exit:
    return;
 }
 
@@ -219,11 +247,11 @@ void RetroArch::onCoreSelected(QVariant value)
    coreSelectedIndex = value.toInt();
 
    core.clear();
-   core.append("app/native/lib/");
-   core.append(coreList[coreSelectedIndex]);
+   core.append(core_info_list->list[coreSelectedIndex].path);
    emit coreChanged(core);
 
-   romExtensions = GET_CORE_INFO(coreSelectedIndex, "supported_extensions");
+   romExtensions = QString("*.%1").arg(core_info_list->list[coreSelectedIndex].supported_extensions);
+   romExtensions.replace("|", "|*.");
    emit romExtensionsChanged(romExtensions);
 
    qDebug() << "Core Selected: " << core;
@@ -253,55 +281,54 @@ void RetroArch::startEmulator()
    }
 }
 
-void RetroArch::findCores()
+void RetroArch::populateCores(core_info_list_t * info)
 {
-   DIR *dirp;
-   struct dirent* direntp;
-   int count=0, i=0;
+   int i;
+   Option *tmp;
 
-   dirp = opendir(g_settings.libretro);
-   if( dirp != NULL ) {
-      for(;;) {
-         direntp = readdir( dirp );
-         if( direntp == NULL ) break;
-         count++;
-      }
-      fflush(stdout);
-      rewinddir(dirp);
+   //Populate DropDown
+   for (i = 0; i < info->count; ++i)
+   {
+      qDebug() << info->list[i].display_name;
 
-      if(count==2){
-         printf("No Cores Found");fflush(stdout);
-      }
+      tmp = Option::create().text(QString(info->list[i].display_name))
+                            .value(i);
 
-      coreList = (char**)malloc(count*sizeof(char*));
-      count = 0;
+      coreSelection->add(tmp);
+   }
+}
 
-      for(;;){
-         direntp = readdir( dirp );
-         if( direntp == NULL ) break;
-         coreList[count++] = strdup((char*)direntp->d_name);
-      }
+void RetroArch::findDevices()
+{
+   //Find all connected devices.
+   Option *tmp;
 
-      //Load info for Cores
-      JsonDataAccess jda;
+   deviceSelection->removeAll();
 
-      coreInfo = jda.load("app/native/assets/coreInfo.json").toMap();
+   //Populate DropDown
+   for (int i = 0; i < pads_connected; ++i)
+   {
+      tmp = Option::create().text(devices[i].device_name)
+                            .value(i);
 
-      Option *tmp;
+      deviceSelection->add(tmp);
 
-      //Populate DropDown
-      for (i = 2; i < count; ++i)
+      //QML shows player 1 by default, so set dropdown to their controller.
+      if(devices[i].port == 0 || devices[i].device == DEVICE_KEYPAD)
       {
-         qDebug() << GET_CORE_INFO(i, "display_name");
-
-         tmp = Option::create().text(GET_CORE_INFO(i, "display_name"))
-                               .value(i);
-
-         coreSelection->add(tmp);
+         deviceSelection->setSelectedIndex(i);
       }
    }
+}
 
-   closedir(dirp);
+extern "C" void discoverControllers();
+void RetroArch::discoverController(int player)
+{
+   //TODO: Check device, gamepad/keyboard and return accordingly.
+   discoverControllers();
+   findDevices();
+   buttonMap->refreshButtonMap(player);
+   return;
 }
 
 void RetroArch::initRASettings()
@@ -311,7 +338,8 @@ void RetroArch::initRASettings()
 
    HardwareInfo *hwInfo = new HardwareInfo();
 
-   if(!hwInfo->isPhysicalKeyboardDevice())
-      strlcpy(g_settings.input.overlay, GET_CORE_INFO(coreSelectedIndex, "default_overlay").toAscii().constData(), sizeof(g_settings.input.overlay));
+   //If Physical keyboard or a device mapped to player 1, hide overlay
+   //TODO: Should there be a minimized/quick settings only overlay?
+   if(hwInfo->isPhysicalKeyboardDevice() || port_device[0])
+      *g_settings.input.overlay = '\0';
 }
-

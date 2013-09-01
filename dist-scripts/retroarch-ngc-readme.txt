@@ -1,5 +1,5 @@
 ------------------------------------------------------------------------------
-RETROARCH GX - GAMECUBE - 0.9.9
+RETROARCH GX - GAMECUBE - 0.9.9.3
 ------------------------------------------------------------------------------
 RetroConsole Level: 0
 Author: Themaister, Toad King, Squarepusher/Twin Aphex
@@ -51,9 +51,7 @@ INGAME CONTROLS
 During ingame operation you can do some extra actions:
 
 
-Gamecube pad Z                                 - Go to Settings
 Gamecube pad L + R + LStick Up + Rstick Up     - Go back to 'Menu'
-Gamecube pad L + R + LStick Down + Rstick Down - Quit RetroArch
 
 Right Thumb Stick - Down       - Fast-forwards the game
 Right Thumb Stick - Up         - Rewinds the game in real-time 
@@ -116,7 +114,7 @@ The Gamecube port of RetroArch has the following features:
 new libretro cores
 
 ------------------------------------------------------------------------------
-EMULATOR/GAME CORES BUNDLED WITH WII PORT
+EMULATOR/GAME CORES BUNDLED WITH GAMECUBE PORT
 ------------------------------------------------------------------------------
 The following emulators/games have been ported to RetroArch and are included in 
 the Gamecube release of RetroArch.
@@ -150,20 +148,19 @@ RetroConsole Level 2 emulator port).
 ------------------------------------------------------------------------------
 WHAT EXTENSIONS ARE SUPPORTED BY EACH CORE
 ------------------------------------------------------------------------------
-- Prboom               WAD|wad
-- SNES9x Next          smc|fig|sfc|gd3|gd7|dx2|bsx|swc|zip|SMC|FIG|SFC|BSX|GD3|
-                       GD7|DX2|SWC
-- Genesis Plus GX      md|smd|bin|gen|zip|MD|SMD|bin|GEN|ZIP|sms|SMS|gg|GG|sg|SG|
-                       cue|CUE
-- VBA Next             GBA|gba
-- FCEUmm               nes|NES|unif|UNIF
-- NEStopia             nes|NES|fds|FDS
-- Gambatte             gb|gbc|dmg|zip|GB|GBC|DMG|ZIP
-- Final Burn Alpha     zip|ZIP
-- Mednafen PCE         pce|PCE|cue|CUE
-- Mednafen Wonderswan  ws|WS|wsc|WSC
-- Mednafen NGP         ngp|NGP
-- Mednafen VB          vb|VB
+- Prboom               wad
+- Tyrquake             pak
+- SNES9x Next          smc|fig|sfc|gd3|gd7|dx2|bsx|swc
+- Genesis Plus GX      md|smd|bin|gen|bin|sms|gg|sg|cue
+- VBA Next             gba
+- FCEUmm               nes|unif
+- NEStopia             nes|fds
+- Gambatte             gb|gbc|dmg
+- Final Burn Alpha     zip
+- Mednafen PCE         pce|cue
+- Mednafen Wonderswan  ws|wsc
+- Mednafen NGP         ngp
+- Mednafen VB          vb
 
 ------------------------------------------------------------------------------
 ZIP SUPPORT (IN GENERAL)
@@ -191,9 +188,6 @@ automatically pick a random libretro core and write this to the config file.
 What can you expect in the future?
 ------------------------------------------------------------------------------
 - Make the libxenon port release-worthy.
-- Add console-friendly features (nicely formatted names for FBA, some better
-way to do core switching, etc)
-- Fix NxEngine issues on consoles
 - Finish up MAME 0.72 port
 - Finish up ScummVM port
 - Port of VICE to libretro
@@ -218,7 +212,7 @@ Websites
 ------------------------------------------------------------------------------
 Twitter:                   http://twitter.com/libretro
 Source:                    http://github.com/libretro
-Homepage:                  http://www.libretro.org
+Homepage:                  http://www.libretro.com
 IRC:                       #retroarch (freenode)
 
 ------------------------------------------------------------------------------

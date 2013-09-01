@@ -19,7 +19,7 @@
 
 #include <sys/types.h>
 #include "boolean.h"
-#include "libretro.h"
+#include "libretro_private.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include "msvc/msvc_compat.h"
@@ -219,6 +219,8 @@ enum input_devices
    DEVICE_NONE = 0,
    DEVICE_LOGITECH_RUMBLEPAD2,
    DEVICE_LOGITECH_DUAL_ACTION,
+   DEVICE_LOGITECH_PRECISION_GAMEPAD,
+   DEVICE_ICONTROLPAD_HID_JOYSTICK,
    DEVICE_ICONTROLPAD_BLUEZ_IME,
    DEVICE_TTT_THT_ARCADE,
    DEVICE_TOMMO_NEOGEOX_ARCADE,
@@ -262,6 +264,13 @@ enum input_devices
    DEVICE_CCPCREATIONS_WIIUSE_IME,
    DEVICE_KEYBOARD_RETROPAD,
    DEVICE_OUYA,
+   DEVICE_ONLIVE_WIRELESS_CONTROLLER,
+   DEVICE_TOMEE_NES_USB,
+   DEVICE_THRUSTMASTER_T_MINI,
+   DEVICE_GAMEMID,
+   DEVICE_DEFENDER_GAME_RACER_CLASSIC,
+   DEVICE_HOLTEK_JC_U912F,
+   DEVICE_NVIDIA_SHIELD,
 #elif defined(GEKKO)
    DEVICE_GAMECUBE = 0,
 #ifdef HW_RVL
@@ -277,8 +286,13 @@ enum input_devices
    DEVICE_NONE,
    DEVICE_WIIMOTE,
    DEVICE_KEYBOARD,
+   DEVICE_IPEGA,
    DEVICE_KEYPAD,
    DEVICE_UNKNOWN,
+#elif defined(IOS)
+   DEVICE_NONE,
+   DEVICE_WIIMOTE,
+   DEVICE_SIXAXIS,
 #endif
    DEVICE_LAST
 };
@@ -288,6 +302,7 @@ enum analog_dpad_bind_enums
    ANALOG_DPAD_NONE = 0,
    ANALOG_DPAD_LSTICK,
    ANALOG_DPAD_RSTICK,
+   ANALOG_DPAD_DUALANALOG,
    ANALOG_DPAD_LAST
 };
 
@@ -404,6 +419,11 @@ typedef struct driver
 
    bool threaded_video;
 
+   // If set during context deinit, the driver should keep
+   // graphics context alive to avoid having to reset all context state.
+   bool video_cache_context;
+   bool video_cache_context_ack; // Set to true by driver if context caching succeeded.
+
    // Set if the respective handles are owned by RetroArch driver core.
    // Consoles upper logic will generally intialize the drivers before
    // the driver core initializes. It will then be up to upper logic
@@ -465,6 +485,7 @@ void init_audio(void);
 void uninit_audio(void);
 
 void driver_set_monitor_refresh_rate(float hz);
+bool driver_monitor_fps_statistics(double *refresh_rate, double *deviation, unsigned *sample_points);
 void driver_set_nonblock_state(bool nonblock);
 
 // Used by RETRO_ENVIRONMENT_SET_HW_RENDER.
@@ -502,6 +523,7 @@ extern const video_driver_t video_xdk_d3d;
 extern const video_driver_t video_sdl;
 extern const video_driver_t video_vg;
 extern const video_driver_t video_null;
+extern const video_driver_t video_omap;
 extern const input_driver_t input_android;
 extern const input_driver_t input_sdl;
 extern const input_driver_t input_dinput;
@@ -512,7 +534,8 @@ extern const input_driver_t input_xenon360;
 extern const input_driver_t input_gx;
 extern const input_driver_t input_xinput;
 extern const input_driver_t input_linuxraw;
-extern const input_driver_t input_ios;
+extern const input_driver_t input_apple;
+extern const input_driver_t input_qnx;
 extern const input_driver_t input_null;
 
 #include "driver_funcs.h"

@@ -59,8 +59,6 @@ static void print_cur_config (void *data)
          AConfiguration_getUiModeNight(android_app->config));
 }
 
-#define MAX_ARGS 32
-
 static bool android_run_events (void *data)
 {
    int id = ALooper_pollOnce(-1, NULL, NULL, NULL);
@@ -152,9 +150,14 @@ static bool android_app_start_main(struct android_app *android_app)
    RARCH_LOG("Config file: [%s].\n", g_extern.config_path);
    RARCH_LOG("Current IME: [%s].\n", android_app->current_ime);
 
+   config_load();
+
+   menu_init();
+
    ret = load_menu_game();
    if (ret)
       g_extern.lifecycle_mode_state |= (1ULL << MODE_GAME);
+
    return ret;
 }
 
@@ -189,10 +192,12 @@ static void *android_app_entry(void *data)
    }
 
    rarch_init_msg_queue();
-   menu_init();
 
    if (!android_app_start_main(android_app))
    {
+      g_settings.input.overlay[0] = 0;
+      // threaded video doesn't work right for just displaying one frame
+      g_settings.video.threaded = false;
       init_drivers();
       driver.video_poke->set_aspect_ratio(driver.video_data, ASPECT_RATIO_SQUARE);
       rarch_render_cached_frame();
@@ -232,21 +237,31 @@ static void *android_app_entry(void *data)
          if (driver.video_poke->set_aspect_ratio)
             driver.video_poke->set_aspect_ratio(driver.video_data, g_settings.video.aspect_ratio_idx);
 
-         if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_THROTTLE_ENABLE))
-            audio_start_func();
-
          // Main loop
          while (rarch_main_iterate());
 
-         if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_THROTTLE_ENABLE))
-            audio_stop_func();
          g_extern.lifecycle_mode_state &= ~(1ULL << MODE_GAME);
       }
       else if(g_extern.lifecycle_mode_state & (1ULL << MODE_MENU))
       {
          g_extern.lifecycle_mode_state |= (1ULL << MODE_MENU_PREINIT);
+
+         // Menu should always run with vsync on
+         video_set_nonblock_state_func(false);
+
+         if (driver.audio_data)
+            audio_stop_func();
+
          while((input_key_pressed_func(RARCH_PAUSE_TOGGLE)) ?
                android_run_events(android_app) : menu_iterate());
+
+         driver_set_nonblock_state(driver.nonblock_state);
+
+         if (driver.audio_data && !audio_start_func())
+         {
+            RARCH_ERR("Failed to resume audio driver. Will continue without audio.\n");
+            g_extern.audio_active = false;
+         }
 
          g_extern.lifecycle_mode_state &= ~(1ULL << MODE_MENU);
       }
@@ -259,6 +274,9 @@ exit:
    RARCH_LOG("Deinitializing RetroArch...\n");
 
    menu_free();
+
+   if (g_extern.config_save_on_exit && *g_extern.config_path)
+      config_save_file(g_extern.config_path);
 
    if (g_extern.main_is_init)
       rarch_main_deinit();

@@ -21,6 +21,7 @@
 #include <limits.h>
 #include "menu_common.h"
 
+#include "../../performance.h"
 #include "../../file.h"
 #ifdef HAVE_FILEBROWSER
 #include "utils/file_browser.h"
@@ -137,7 +138,7 @@ static bool directory_parse(void *data, const char *path)
 
    struct string_list *list = dir_list_new(path,
          filebrowser->current_dir.extensions, true);
-   if(!list)
+   if(!list || list->size < 1)
       return false;
    
    dir_list_sort(list, true);
@@ -146,7 +147,7 @@ static bool directory_parse(void *data, const char *path)
    strlcpy(filebrowser->current_dir.directory_path,
          path, sizeof(filebrowser->current_dir.directory_path));
 
-   if(filebrowser->list)
+   if (filebrowser->list)
       dir_list_free(filebrowser->list);
 
    filebrowser->list = list;
@@ -242,7 +243,8 @@ bool filebrowser_iterate(void *data, unsigned action)
          break;
    }
 
-   strlcpy(filebrowser->current_dir.path, GET_CURRENT_PATH(filebrowser),
+   if (ret)
+      strlcpy(filebrowser->current_dir.path, GET_CURRENT_PATH(filebrowser),
          sizeof(filebrowser->current_dir.path));
 
    return ret;
@@ -377,7 +379,14 @@ void menu_rom_history_push_current(void)
    // Ensure we're pushing absolute path.
 
    char tmp[PATH_MAX];
-   strlcpy(tmp, g_extern.fullpath, sizeof(tmp));
+
+   // We loaded a zip, and fullpath points to the extracted file.
+   // Look at basename instead.
+   if (g_extern.rom_file_temporary)
+      snprintf(tmp, sizeof(tmp), "%s.zip", g_extern.basename);
+   else
+      strlcpy(tmp, g_extern.fullpath, sizeof(tmp));
+
    if (*tmp)
       path_resolve_realpath(tmp, sizeof(tmp));
 
@@ -403,7 +412,7 @@ void load_menu_game_prepare(void)
 
       menu_rom_history_push(*g_extern.fullpath ? g_extern.fullpath : NULL,
             g_settings.libretro,
-            rgui->info.library_name);
+            rgui->info.library_name ? rgui->info.library_name : "");
    }
 
 #ifdef HAVE_RGUI
@@ -435,28 +444,18 @@ void load_menu_game_history(unsigned game_index)
    rom_history_get_index(rgui->history,
          game_index, &path, &core_path, &core_name);
 
-   strlcpy(g_settings.libretro, core_path, sizeof(g_settings.libretro));
+   rarch_environment_cb(RETRO_ENVIRONMENT_SET_LIBRETRO_PATH, (void*)core_path);
 
    if (path)
-   {
       rgui->load_no_rom = false;
-      strlcpy(g_extern.fullpath, path, sizeof(g_extern.fullpath));
-   }
    else
-   {
       rgui->load_no_rom = true;
-      *g_extern.fullpath = '\0';
-   }
 
-#if !defined( HAVE_DYNAMIC) && defined(RARCH_CONSOLE)
-   g_extern.lifecycle_mode_state &= ~(1ULL << MODE_GAME);
-   g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
-   g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN);
-   g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN_START_GAME);
-#elif defined(HAVE_DYNAMIC)
+   rarch_environment_cb(RETRO_ENVIRONMENT_EXEC, (void*)path);
+
+#if defined(HAVE_DYNAMIC)
    libretro_free_system_info(&rgui->info);
    libretro_get_system_info(g_settings.libretro, &rgui->info, NULL);
-   g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME);
 #endif
 }
 
@@ -555,16 +554,22 @@ void menu_init(void)
    shader_manager_init(rgui);
 #endif
 
-   // TODO: Should make history path configurable.
-   // Possibly size as well.
    if (*g_extern.config_path)
    {
       char history_path[PATH_MAX];
-      fill_pathname_resolve_relative(history_path, g_extern.config_path,
-            ".retroarch-history.txt", sizeof(history_path));
+      if (*g_settings.game_history_path)
+         strlcpy(history_path, g_settings.game_history_path, sizeof(history_path));
+      else
+      {
+         fill_pathname_resolve_relative(history_path, g_extern.config_path,
+               ".retroarch-game-history.txt", sizeof(history_path));
+      }
+
       RARCH_LOG("[RGUI]: Opening history: %s.\n", history_path);
-      rgui->history = rom_history_init(history_path, 20);
+      rgui->history = rom_history_init(history_path, g_settings.game_history_size);
    }
+
+   rgui->last_time = rarch_get_time_usec();
 }
 
 void menu_free(void)
@@ -621,8 +626,146 @@ void menu_ticker_line(char *buf, size_t len, unsigned index, const char *str, bo
 
 #ifndef HAVE_RMENU_XUI
 #if defined(HAVE_RMENU) || defined(HAVE_RGUI)
+
+static const struct retro_keybind _menu_nav_binds[] = {
+#if defined(HW_RVL)
+   { 0, 0, NULL, 0, GX_GC_UP | GX_GC_LSTICK_UP | GX_GC_RSTICK_UP | GX_CLASSIC_UP | GX_CLASSIC_LSTICK_UP | GX_CLASSIC_RSTICK_UP | GX_WIIMOTE_UP | GX_NUNCHUK_UP, 0 },
+   { 0, 0, NULL, 0, GX_GC_DOWN | GX_GC_LSTICK_DOWN | GX_GC_RSTICK_DOWN | GX_CLASSIC_DOWN | GX_CLASSIC_LSTICK_DOWN | GX_CLASSIC_RSTICK_DOWN | GX_WIIMOTE_DOWN | GX_NUNCHUK_DOWN, 0 },
+   { 0, 0, NULL, 0, GX_GC_LEFT | GX_GC_LSTICK_LEFT | GX_GC_RSTICK_LEFT | GX_CLASSIC_LEFT | GX_CLASSIC_LSTICK_LEFT | GX_CLASSIC_RSTICK_LEFT | GX_WIIMOTE_LEFT | GX_NUNCHUK_LEFT, 0 },
+   { 0, 0, NULL, 0, GX_GC_RIGHT | GX_GC_LSTICK_RIGHT | GX_GC_RSTICK_RIGHT | GX_CLASSIC_RIGHT | GX_CLASSIC_LSTICK_RIGHT | GX_CLASSIC_RSTICK_RIGHT | GX_WIIMOTE_RIGHT | GX_NUNCHUK_RIGHT, 0 },
+   { 0, 0, NULL, 0, GX_GC_A | GX_CLASSIC_A | GX_WIIMOTE_A | GX_WIIMOTE_2, 0 },
+   { 0, 0, NULL, 0, GX_GC_B | GX_CLASSIC_B | GX_WIIMOTE_B | GX_WIIMOTE_1, 0 },
+   { 0, 0, NULL, 0, GX_GC_START | GX_CLASSIC_PLUS | GX_WIIMOTE_PLUS, 0 },
+   { 0, 0, NULL, 0, GX_GC_Z_TRIGGER | GX_CLASSIC_MINUS | GX_WIIMOTE_MINUS, 0 },
+   { 0, 0, NULL, 0, GX_WIIMOTE_HOME | GX_CLASSIC_HOME, 0 },
+#elif defined(HW_DOL)
+   { 0, 0, NULL, 0, GX_GC_UP | GX_GC_LSTICK_UP | GX_GC_RSTICK_UP, 0 },
+   { 0, 0, NULL, 0, GX_GC_DOWN | GX_GC_LSTICK_DOWN | GX_GC_RSTICK_DOWN, 0 },
+   { 0, 0, NULL, 0, GX_GC_LEFT | GX_GC_LSTICK_LEFT | GX_GC_RSTICK_LEFT, 0 },
+   { 0, 0, NULL, 0, GX_GC_RIGHT | GX_GC_LSTICK_RIGHT | GX_GC_RSTICK_RIGHT, 0 },
+   { 0, 0, NULL, 0, GX_GC_A, 0 },
+   { 0, 0, NULL, 0, GX_GC_B, 0 },
+   { 0, 0, NULL, 0, GX_GC_START, 0 },
+   { 0, 0, NULL, 0, GX_GC_Z_TRIGGER, 0 },
+   { 0, 0, NULL, 0, GX_WIIMOTE_HOME, 0 },
+#elif defined(__CELLOS_LV2__) || defined(_XBOX1)
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_UP) | (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_UP), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_DOWN) | (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_DOWN), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_LEFT) | (1ULL << RARCH_ANALOG_LEFT_X_DPAD_LEFT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_RIGHT) | (1ULL << RARCH_ANALOG_LEFT_X_DPAD_RIGHT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_UP), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_DOWN), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_LEFT_X_DPAD_LEFT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_LEFT_X_DPAD_RIGHT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_RIGHT_Y_DPAD_UP), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_RIGHT_Y_DPAD_DOWN), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_RIGHT_X_DPAD_LEFT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_ANALOG_RIGHT_X_DPAD_RIGHT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_B), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_A), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_X), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_Y), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_START), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_SELECT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_L), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_R), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_L2), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_R2), 0 },
+#else
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_UP), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_DOWN), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_LEFT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_RIGHT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_A), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_B), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_START), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_SELECT), 0 },
+   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_MENU_TOGGLE), 0 },
+#endif
+};
+
+#if defined(RARCH_CONSOLE) || defined(ANDROID)
+static const struct retro_keybind *menu_nav_binds[] = {
+   _menu_nav_binds
+};
+#endif
+
+static uint64_t rgui_input(void)
+{
+   uint64_t input_state = 0;
+
+   // FIXME: Very ugly. Should do something more uniform.
+#if defined(RARCH_CONSOLE) || defined(ANDROID)
+   for (unsigned i = 0; i < DEVICE_NAV_LAST; i++)
+      input_state |= driver.input->input_state(driver.input_data, menu_nav_binds, 0,
+            RETRO_DEVICE_JOYPAD, 0, i) ? (1ULL << i) : 0;
+
+   input_state |= driver.input->key_pressed(driver.input_data, RARCH_MENU_TOGGLE) ? (1ULL << DEVICE_NAV_MENU) : 0;
+
+#ifdef HAVE_OVERLAY
+   for (unsigned i = 0; i < DEVICE_NAV_LAST; i++)
+      input_state |= driver.overlay_state & menu_nav_binds[0][i].joykey ? (1ULL << i) : 0;
+#endif
+#else
+   static const int maps[] = {
+      RETRO_DEVICE_ID_JOYPAD_UP,     DEVICE_NAV_UP,
+      RETRO_DEVICE_ID_JOYPAD_DOWN,   DEVICE_NAV_DOWN,
+      RETRO_DEVICE_ID_JOYPAD_LEFT,   DEVICE_NAV_LEFT,
+      RETRO_DEVICE_ID_JOYPAD_RIGHT,  DEVICE_NAV_RIGHT,
+      RETRO_DEVICE_ID_JOYPAD_A,      DEVICE_NAV_A,
+      RETRO_DEVICE_ID_JOYPAD_B,      DEVICE_NAV_B,
+      RETRO_DEVICE_ID_JOYPAD_START,  DEVICE_NAV_START,
+      RETRO_DEVICE_ID_JOYPAD_SELECT, DEVICE_NAV_SELECT,
+   };
+
+   static const struct retro_keybind *binds[] = { g_settings.input.binds[0] };
+
+   for (unsigned i = 0; i < ARRAY_SIZE(maps); i += 2)
+   {
+      input_state |= input_input_state_func(binds,
+            0, RETRO_DEVICE_JOYPAD, 0, maps[i + 0]) ? (1ULL << maps[i + 1]) : 0;
+#ifdef HAVE_OVERLAY
+      input_state |= (driver.overlay_state & (UINT64_C(1) << maps[i + 0])) ? (1ULL << maps[i + 1]) : 0;
+#endif
+   }
+
+   input_state |= input_key_pressed_func(RARCH_MENU_TOGGLE) ? (1ULL << DEVICE_NAV_MENU) : 0;
+#endif
+
+   rgui->trigger_state = input_state & ~rgui->old_input_state;
+
+#if defined(HAVE_RGUI)
+   rgui->do_held = (input_state & (
+         (1ULL << DEVICE_NAV_UP) |
+         (1ULL << DEVICE_NAV_DOWN) |
+         (1ULL << DEVICE_NAV_LEFT) | 
+         (1ULL << DEVICE_NAV_RIGHT))) &&
+      !(input_state & (1ULL << DEVICE_NAV_MENU));
+#elif defined(HAVE_RMENU)
+   rgui->do_held = (input_state & (
+            (1ULL << DEVICE_NAV_LEFT) |
+            (1ULL << DEVICE_NAV_RIGHT) |
+            (1ULL << DEVICE_NAV_UP) |
+            (1ULL << DEVICE_NAV_DOWN) |
+            (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_UP) |
+            (1ULL << RARCH_ANALOG_LEFT_Y_DPAD_DOWN) |
+            (1ULL << RARCH_ANALOG_LEFT_X_DPAD_LEFT) |
+            (1ULL << RARCH_ANALOG_LEFT_X_DPAD_RIGHT) |
+            (1ULL << RARCH_ANALOG_RIGHT_Y_DPAD_UP) |
+            (1ULL << RARCH_ANALOG_RIGHT_Y_DPAD_DOWN) |
+            (1ULL << RARCH_ANALOG_RIGHT_X_DPAD_LEFT) |
+            (1ULL << RARCH_ANALOG_RIGHT_X_DPAD_RIGHT) |
+            (1ULL << DEVICE_NAV_L2) |
+            (1ULL << DEVICE_NAV_R2)
+            )) && !(input_state & (1ULL << DEVICE_NAV_MENU));
+#endif
+
+   return input_state;
+}
+
 bool menu_iterate(void)
 {
+   rarch_time_t time, delta, target_msec, sleep_msec;
    static bool initial_held = true;
    static bool first_held = false;
    uint64_t input_state = 0;
@@ -679,6 +822,15 @@ bool menu_iterate(void)
       driver.video_poke->set_texture_enable(driver.video_data, rgui->frame_buf_show, MENU_TEXTURE_FULLSCREEN);
 
    rarch_render_cached_frame();
+
+   // Throttle in case VSync is broken (avoid 1000+ FPS RGUI).
+   time = rarch_get_time_usec();
+   delta = (time - rgui->last_time) / 1000;
+   target_msec = 750 / g_settings.video.refresh_rate; // Try to sleep less, so we can hopefully rely on FPS logger.
+   sleep_msec = target_msec - delta;
+   if (sleep_msec > 0)
+      rarch_sleep(sleep_msec);
+   rgui->last_time = rarch_get_time_usec();
 
    if (driver.video_poke && driver.video_poke->set_texture_enable)
       driver.video_poke->set_texture_enable(driver.video_data, false,

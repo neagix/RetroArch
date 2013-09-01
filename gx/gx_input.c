@@ -33,12 +33,16 @@
 #include "../libretro.h"
 #include <stdlib.h>
 
-#define GC_JOYSTICK_THRESHOLD 48
-#define WII_JOYSTICK_THRESHOLD 40
+#define GC_JOYSTICK_THRESHOLD (48 * 256)
+#define WII_JOYSTICK_THRESHOLD (40 * 256)
 
 #define MAX_PADS 4
 
+static u32 pad_connect[MAX_PADS];
+static u32 pad_type[MAX_PADS];
+static u32 pad_detect_pending[MAX_PADS];
 static uint64_t pad_state[MAX_PADS];
+static int16_t analog_state[MAX_PADS][2][2];
 
 const struct platform_bind platform_keys[] = {
    { GX_GC_A, "GC A button" },
@@ -130,19 +134,29 @@ const struct platform_bind platform_keys[] = {
 };
 
 static bool g_menu;
+
+#ifdef HW_RVL
 static bool g_quit;
+#endif
 
 static int16_t gx_input_state(void *data, const struct retro_keybind **binds,
       unsigned port, unsigned device,
       unsigned index, unsigned id)
 {
    (void)data;
-   (void)index;
 
-   if (port >= MAX_PADS || device != RETRO_DEVICE_JOYPAD)
+   if (port >= MAX_PADS)
       return 0;
 
-   return (binds[port][id].joykey & pad_state[port]) ? 1 : 0;
+   switch (device)
+   {
+      case RETRO_DEVICE_JOYPAD:
+         return (binds[port][id].joykey & pad_state[port]) ? 1 : 0;
+      case RETRO_DEVICE_ANALOG:
+         return analog_state[port][index][id];
+      default:
+         return 0;
+   }
 }
 
 static void gx_input_free_input(void *data)
@@ -435,10 +449,19 @@ static void gx_input_set_keybinds(void *data, unsigned device, unsigned port,
          strlcpy(ret->desc, "Unknown", sizeof(ret->desc));
       }
    }
+
+   pad_detect_pending[port] = 1;
 }
 
 static void *gx_input_init(void)
 {
+   for (unsigned i = 0; i < MAX_PADS; i++)
+   {
+      pad_connect[i] = 0;
+      pad_type[i] = 0;
+      pad_detect_pending[i] = 1;
+   }
+
    PAD_Init();
 #ifdef HW_RVL
    WPAD_Init();
@@ -490,6 +513,10 @@ static void gx_input_poll(void *data)
    pad_state[1] = 0;
    pad_state[2] = 0;
    pad_state[3] = 0;
+   analog_state[0][0][0] = analog_state[0][0][1] = analog_state[0][1][0] = analog_state[0][1][1] = 0;
+   analog_state[1][0][0] = analog_state[1][0][1] = analog_state[1][1][0] = analog_state[1][1][1] = 0;
+   analog_state[2][0][0] = analog_state[2][0][1] = analog_state[2][1][0] = analog_state[2][1][1] = 0;
+   analog_state[3][0][0] = analog_state[3][0][1] = analog_state[3][1][0] = analog_state[3][1][1] = 0;
 
    PAD_ScanPads();
 
@@ -501,12 +528,19 @@ static void gx_input_poll(void *data)
    {
       uint32_t down = 0;
       uint64_t *state_cur = &pad_state[port];
-      bool dpad_emulation = (g_settings.input.dpad_emulation[port] != ANALOG_DPAD_NONE);
 
 #ifdef HW_RVL
-      uint32_t type = 0;
+      if (pad_detect_pending[port])
+      {
+         u32 *ptype = &pad_type[port];
+         pad_connect[port] = WPAD_Probe(port, ptype);
+         pad_detect_pending[port] = 0;
+      }
+
+      uint32_t connected = pad_connect[port];
+      uint32_t type = pad_type[port];
       
-      if (WPAD_Probe(port, &type) == WPAD_ERR_NONE)
+      if (connected == WPAD_ERR_NONE)
       {
          WPADData *wpaddata = WPAD_Data(port);
 
@@ -545,46 +579,48 @@ static void gx_input_poll(void *data)
             *state_cur |= (down & WPAD_CLASSIC_BUTTON_ZL) ? GX_CLASSIC_ZL_TRIGGER : 0;
             *state_cur |= (down & WPAD_CLASSIC_BUTTON_ZR) ? GX_CLASSIC_ZR_TRIGGER : 0;
 
-            if (dpad_emulation)
-            {
-               float ljs_mag = exp->classic.ljs.mag;
-               float ljs_ang = exp->classic.ljs.ang;
+            float ljs_mag = exp->classic.ljs.mag;
+            float ljs_ang = exp->classic.ljs.ang;
 
-               float rjs_mag = exp->classic.rjs.mag;
-               float rjs_ang = exp->classic.rjs.ang;
+            float rjs_mag = exp->classic.rjs.mag;
+            float rjs_ang = exp->classic.rjs.ang;
 
-               if (ljs_mag > 1.0f)
-                  ljs_mag = 1.0f;
-               else if (ljs_mag < -1.0f)
-                  ljs_mag = -1.0f;
+            if (ljs_mag > 1.0f)
+               ljs_mag = 1.0f;
+            else if (ljs_mag < -1.0f)
+               ljs_mag = -1.0f;
 
-               if (rjs_mag > 1.0f)
-                  rjs_mag = 1.0f;
-               else if (rjs_mag < -1.0f)
-                  rjs_mag = -1.0f;
+            if (rjs_mag > 1.0f)
+               rjs_mag = 1.0f;
+            else if (rjs_mag < -1.0f)
+               rjs_mag = -1.0f;
 
-               double ljs_val_x = -ljs_mag * sin(M_PI * ljs_ang / 180.0);
-               double ljs_val_y = -ljs_mag * cos(M_PI * ljs_ang / 180.0);
+            double ljs_val_x = ljs_mag * sin(M_PI * ljs_ang / 180.0);
+            double ljs_val_y = -ljs_mag * cos(M_PI * ljs_ang / 180.0);
 
-               double rjs_val_x = -rjs_mag * sin(M_PI * rjs_ang / 180.0);
-               double rjs_val_y = -rjs_mag * cos(M_PI * rjs_ang / 180.0);
+            double rjs_val_x = rjs_mag * sin(M_PI * rjs_ang / 180.0);
+            double rjs_val_y = -rjs_mag * cos(M_PI * rjs_ang / 180.0);
 
-               s8 ls_x = (s8)(ljs_val_x * 127.0f);
-               s8 ls_y = (s8)(ljs_val_y * 127.0f);
+            int16_t ls_x = (int16_t)(ljs_val_x * 32767.0f);
+            int16_t ls_y = (int16_t)(ljs_val_y * 32767.0f);
 
-               s8 rs_x = (s8)(rjs_val_x * 127.0f);
-               s8 rs_y = (s8)(rjs_val_y * 127.0f);
+            int16_t rs_x = (int16_t)(rjs_val_x * 32767.0f);
+            int16_t rs_y = (int16_t)(rjs_val_y * 32767.0f);
 
-               *state_cur |= (ls_x < -WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_LSTICK_RIGHT : 0;
-               *state_cur |= (ls_x > WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_LSTICK_LEFT : 0;
-               *state_cur |= (ls_y < -WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_LSTICK_UP : 0;
-               *state_cur |= (ls_y > WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_LSTICK_DOWN : 0;
+            analog_state[port][RETRO_DEVICE_INDEX_ANALOG_LEFT][RETRO_DEVICE_ID_ANALOG_X] = ls_x;
+            analog_state[port][RETRO_DEVICE_INDEX_ANALOG_LEFT][RETRO_DEVICE_ID_ANALOG_Y] = ls_y;
+            analog_state[port][RETRO_DEVICE_INDEX_ANALOG_RIGHT][RETRO_DEVICE_ID_ANALOG_X] = rs_x;
+            analog_state[port][RETRO_DEVICE_INDEX_ANALOG_RIGHT][RETRO_DEVICE_ID_ANALOG_Y] = rs_y;
 
-               *state_cur |= (rs_x < -WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_RSTICK_RIGHT : 0;
-               *state_cur |= (rs_x > WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_RSTICK_LEFT: 0;
-               *state_cur |= (rs_y < -WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_RSTICK_UP : 0;
-               *state_cur |= (rs_y > WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_RSTICK_DOWN : 0;
-            }
+            *state_cur |= (ls_x > WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_LSTICK_RIGHT : 0;
+            *state_cur |= (ls_x < -WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_LSTICK_LEFT : 0;
+            *state_cur |= (ls_y < -WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_LSTICK_UP : 0;
+            *state_cur |= (ls_y > WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_LSTICK_DOWN : 0;
+
+            *state_cur |= (rs_x > WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_RSTICK_RIGHT : 0;
+            *state_cur |= (rs_x < -WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_RSTICK_LEFT: 0;
+            *state_cur |= (rs_y < -WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_RSTICK_UP : 0;
+            *state_cur |= (rs_y > WII_JOYSTICK_THRESHOLD) ? GX_CLASSIC_RSTICK_DOWN : 0;
          }
          else if (type == WPAD_EXP_NUNCHUK)
          {
@@ -597,30 +633,29 @@ static void gx_input_poll(void *data)
             *state_cur |= (down & WPAD_NUNCHUK_BUTTON_Z) ? GX_NUNCHUK_Z : 0;
             *state_cur |= (down & WPAD_NUNCHUK_BUTTON_C) ? GX_NUNCHUK_C : 0;
 
-            if (dpad_emulation)
-            {
-               float js_mag = exp->nunchuk.js.mag;
-               float js_ang = exp->nunchuk.js.ang;
+            float js_mag = exp->nunchuk.js.mag;
+            float js_ang = exp->nunchuk.js.ang;
 
-               if (js_mag > 1.0f)
-                  js_mag = 1.0f;
-               else if (js_mag < -1.0f)
-                  js_mag = -1.0f;
+            if (js_mag > 1.0f)
+               js_mag = 1.0f;
+            else if (js_mag < -1.0f)
+               js_mag = -1.0f;
 
-               double js_val_x = -js_mag * sin(M_PI * js_ang / 180.0);
-               double js_val_y = -js_mag * cos(M_PI * js_ang / 180.0);
+            double js_val_x = js_mag * sin(M_PI * js_ang / 180.0);
+            double js_val_y = -js_mag * cos(M_PI * js_ang / 180.0);
 
-               s8 x = (s8)(js_val_x * 127.0f);
-               s8 y = (s8)(js_val_y * 127.0f);
+            int16_t x = (int16_t)(js_val_x * 32767.0f);
+            int16_t y = (int16_t)(js_val_y * 32767.0f);
 
-               *state_cur |= (x < -WII_JOYSTICK_THRESHOLD) ? GX_NUNCHUK_RIGHT : 0;
-               *state_cur |= (x > WII_JOYSTICK_THRESHOLD) ? GX_NUNCHUK_LEFT : 0;
-               *state_cur |= (y < -WII_JOYSTICK_THRESHOLD) ? GX_NUNCHUK_UP : 0;
-               *state_cur |= (y > WII_JOYSTICK_THRESHOLD) ? GX_NUNCHUK_DOWN : 0;
-            }
+            analog_state[port][RETRO_DEVICE_INDEX_ANALOG_LEFT][RETRO_DEVICE_ID_ANALOG_X] = x;
+            analog_state[port][RETRO_DEVICE_INDEX_ANALOG_LEFT][RETRO_DEVICE_ID_ANALOG_Y] = y;
+
+            *state_cur |= (x > WII_JOYSTICK_THRESHOLD) ? GX_NUNCHUK_RIGHT : 0;
+            *state_cur |= (x < -WII_JOYSTICK_THRESHOLD) ? GX_NUNCHUK_LEFT : 0;
+            *state_cur |= (y < -WII_JOYSTICK_THRESHOLD) ? GX_NUNCHUK_UP : 0;
+            *state_cur |= (y > WII_JOYSTICK_THRESHOLD) ? GX_NUNCHUK_DOWN : 0;
          }
       }
-
 #endif
 
       if (SI_GetType(port) & SI_TYPE_GC)
@@ -640,24 +675,25 @@ static void gx_input_poll(void *data)
          *state_cur |= ((down & PAD_TRIGGER_L) || PAD_TriggerL(port) > 127) ? GX_GC_L_TRIGGER : 0;
          *state_cur |= ((down & PAD_TRIGGER_R) || PAD_TriggerR(port) > 127) ? GX_GC_R_TRIGGER : 0;
 
-         if (dpad_emulation)
-         {
-            s8 x = PAD_StickX(port);
-            s8 y = PAD_StickY(port);
+         int16_t ls_x = (int16_t)PAD_StickX(port) * 256;
+         int16_t ls_y = (int16_t)PAD_StickY(port) * -256;
+         int16_t rs_x = (int16_t)PAD_SubStickX(port) * 256;
+         int16_t rs_y = (int16_t)PAD_SubStickY(port) * -256;
 
-            *state_cur |= (x < -GC_JOYSTICK_THRESHOLD) ? GX_GC_LSTICK_LEFT : 0;
-            *state_cur |= (x > GC_JOYSTICK_THRESHOLD) ? GX_GC_LSTICK_RIGHT : 0;
-            *state_cur |= (y < -GC_JOYSTICK_THRESHOLD) ? GX_GC_LSTICK_DOWN : 0;
-            *state_cur |= (y > GC_JOYSTICK_THRESHOLD) ? GX_GC_LSTICK_UP : 0;
+         analog_state[port][RETRO_DEVICE_INDEX_ANALOG_LEFT][RETRO_DEVICE_ID_ANALOG_X] = ls_x;
+         analog_state[port][RETRO_DEVICE_INDEX_ANALOG_LEFT][RETRO_DEVICE_ID_ANALOG_Y] = ls_y;
+         analog_state[port][RETRO_DEVICE_INDEX_ANALOG_RIGHT][RETRO_DEVICE_ID_ANALOG_X] = rs_x;
+         analog_state[port][RETRO_DEVICE_INDEX_ANALOG_RIGHT][RETRO_DEVICE_ID_ANALOG_Y] = rs_y;
 
-            x = PAD_SubStickX(port);
-            y = PAD_SubStickY(port);
+         *state_cur |= (ls_x < -GC_JOYSTICK_THRESHOLD) ? GX_GC_LSTICK_LEFT : 0;
+         *state_cur |= (ls_x > GC_JOYSTICK_THRESHOLD) ? GX_GC_LSTICK_RIGHT : 0;
+         *state_cur |= (ls_y > GC_JOYSTICK_THRESHOLD) ? GX_GC_LSTICK_DOWN : 0;
+         *state_cur |= (ls_y < -GC_JOYSTICK_THRESHOLD) ? GX_GC_LSTICK_UP : 0;
 
-            *state_cur |= (x < -GC_JOYSTICK_THRESHOLD) ? GX_GC_RSTICK_LEFT : 0;
-            *state_cur |= (x > GC_JOYSTICK_THRESHOLD) ? GX_GC_RSTICK_RIGHT : 0;
-            *state_cur |= (y < -GC_JOYSTICK_THRESHOLD) ? GX_GC_RSTICK_DOWN : 0;
-            *state_cur |= (y > GC_JOYSTICK_THRESHOLD) ? GX_GC_RSTICK_UP : 0;
-         }
+         *state_cur |= (rs_x < -GC_JOYSTICK_THRESHOLD) ? GX_GC_RSTICK_LEFT : 0;
+         *state_cur |= (rs_x > GC_JOYSTICK_THRESHOLD) ? GX_GC_RSTICK_RIGHT : 0;
+         *state_cur |= (rs_y > GC_JOYSTICK_THRESHOLD) ? GX_GC_RSTICK_DOWN : 0;
+         *state_cur |= (rs_y < -GC_JOYSTICK_THRESHOLD) ? GX_GC_RSTICK_UP : 0;
 
          if ((*state_cur & (GX_GC_LSTICK_UP | GX_GC_RSTICK_UP | GX_GC_L_TRIGGER | GX_GC_R_TRIGGER)) == (GX_GC_LSTICK_UP | GX_GC_RSTICK_UP | GX_GC_L_TRIGGER | GX_GC_R_TRIGGER))
             *state_cur |= GX_WIIMOTE_HOME;
@@ -666,7 +702,6 @@ static void gx_input_poll(void *data)
 
    uint64_t *state_p1 = &pad_state[0];
    uint64_t *lifecycle_state = &g_extern.lifecycle_state;
-   bool dpad_emulation = (g_settings.input.dpad_emulation[0] != ANALOG_DPAD_NONE);
 
    *lifecycle_state &= ~(
          (1ULL << RARCH_FAST_FORWARD_HOLD_KEY) | 
@@ -678,51 +713,48 @@ static void gx_input_poll(void *data)
          (1ULL << RARCH_QUIT_KEY) |
          (1ULL << RARCH_MENU_TOGGLE));
 
-   if (dpad_emulation)
-   {
-      if (
+   if (
 #ifdef HW_RVL
-            ((*state_p1 & GX_CLASSIC_RSTICK_DOWN) && !(*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
+         ((*state_p1 & GX_CLASSIC_RSTICK_DOWN) && !(*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
 #endif
-            ((*state_p1 & GX_GC_RSTICK_DOWN) && !(*state_p1 & GX_GC_Z_TRIGGER))
-         )
-         *lifecycle_state |= (1ULL << RARCH_FAST_FORWARD_HOLD_KEY);
-      if (
+         ((*state_p1 & GX_GC_RSTICK_DOWN) && !(*state_p1 & GX_GC_Z_TRIGGER))
+      )
+      *lifecycle_state |= (1ULL << RARCH_FAST_FORWARD_HOLD_KEY);
+   if (
 #ifdef HW_RVL
-            ((*state_p1 & GX_CLASSIC_RSTICK_UP) && (*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
+         ((*state_p1 & GX_CLASSIC_RSTICK_UP) && (*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
 #endif
-            ((*state_p1 & GX_GC_RSTICK_UP) && (*state_p1 & GX_GC_Z_TRIGGER))
-         )
-         *lifecycle_state |= (1ULL << RARCH_LOAD_STATE_KEY);
-      if (
+         ((*state_p1 & GX_GC_RSTICK_UP) && (*state_p1 & GX_GC_Z_TRIGGER))
+      )
+      *lifecycle_state |= (1ULL << RARCH_LOAD_STATE_KEY);
+   if (
 #ifdef HW_RVL
-            ((*state_p1 & GX_CLASSIC_RSTICK_DOWN) && (*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
+         ((*state_p1 & GX_CLASSIC_RSTICK_DOWN) && (*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
 #endif
-            ((*state_p1 & GX_GC_RSTICK_DOWN) && (*state_p1 & GX_GC_Z_TRIGGER))
-         )
-         *lifecycle_state |= (1ULL << RARCH_SAVE_STATE_KEY);
-      if (
+         ((*state_p1 & GX_GC_RSTICK_DOWN) && (*state_p1 & GX_GC_Z_TRIGGER))
+      )
+      *lifecycle_state |= (1ULL << RARCH_SAVE_STATE_KEY);
+   if (
 #ifdef HW_RVL
-            ((*state_p1 & GX_CLASSIC_RSTICK_RIGHT) && (*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
+         ((*state_p1 & GX_CLASSIC_RSTICK_RIGHT) && (*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
 #endif
-            ((*state_p1 & GX_GC_RSTICK_RIGHT) && (*state_p1 & GX_GC_Z_TRIGGER))
-         )
-         *lifecycle_state |= (1ULL << RARCH_STATE_SLOT_PLUS);
-      if (
+         ((*state_p1 & GX_GC_RSTICK_RIGHT) && (*state_p1 & GX_GC_Z_TRIGGER))
+      )
+      *lifecycle_state |= (1ULL << RARCH_STATE_SLOT_PLUS);
+   if (
 #ifdef HW_RVL
-            ((*state_p1 & GX_CLASSIC_RSTICK_LEFT) && (*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
+         ((*state_p1 & GX_CLASSIC_RSTICK_LEFT) && (*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
 #endif
-            ((*state_p1 & GX_GC_RSTICK_LEFT) && (*state_p1 & GX_GC_Z_TRIGGER))
-         )
-         *lifecycle_state |= (1ULL << RARCH_STATE_SLOT_MINUS);
-      if (
+         ((*state_p1 & GX_GC_RSTICK_LEFT) && (*state_p1 & GX_GC_Z_TRIGGER))
+      )
+      *lifecycle_state |= (1ULL << RARCH_STATE_SLOT_MINUS);
+   if (
 #ifdef HW_RVL
-            ((*state_p1 & GX_CLASSIC_RSTICK_UP) && !(*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
+         ((*state_p1 & GX_CLASSIC_RSTICK_UP) && !(*state_p1 & GX_CLASSIC_ZR_TRIGGER)) ||
 #endif
-            ((*state_p1 & GX_GC_RSTICK_UP) && !(*state_p1 & GX_GC_Z_TRIGGER))
-         )
-         *lifecycle_state |= (1ULL << RARCH_REWIND);
-   }
+         ((*state_p1 & GX_GC_RSTICK_UP) && !(*state_p1 & GX_GC_Z_TRIGGER))
+      )
+      *lifecycle_state |= (1ULL << RARCH_REWIND);
 
    if (g_menu)
    {

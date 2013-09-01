@@ -286,7 +286,7 @@ static void gx_set_aspect_ratio(void *data, unsigned aspect_ratio_idx)
    gx_video_t *gx = (gx_video_t*)driver.video_data;
 
    if (aspect_ratio_idx == ASPECT_RATIO_SQUARE)
-      gfx_set_square_pixel_viewport(g_extern.frame_cache.width, g_extern.frame_cache.height);
+      gfx_set_square_pixel_viewport(g_extern.system.av_info.geometry.base_width, g_extern.system.av_info.geometry.base_height);
    else if (aspect_ratio_idx == ASPECT_RATIO_CORE)
       gfx_set_core_viewport();
    else if (aspect_ratio_idx == ASPECT_RATIO_CONFIG)
@@ -910,6 +910,7 @@ static bool gx_frame(void *data, const void *frame,
    g_draw_done = false;
    g_current_framebuf ^= 1;
 
+
    if (frame)
    {
       if (gx->rgb32)
@@ -942,14 +943,15 @@ static bool gx_frame(void *data, const void *frame,
       GX_DrawDone();
    }
 
+   char fps_txt[128];
+   gfx_get_fps(fps_txt, sizeof(fps_txt), lifecycle_mode_state & (1ULL << MODE_FPS_DRAW) ? true : false);
+
    if (lifecycle_mode_state & (1ULL << MODE_FPS_DRAW))
    {
-      char fps_txt[128];
       char mem1_txt[128];
       unsigned x = 15;
       unsigned y = 35;
 
-      gfx_get_fps(fps_txt, sizeof(fps_txt), true);
       gx_blit_line(x, y, fps_txt);
       y += FONT_HEIGHT * (gx->double_strike ? 1 : 2);
       snprintf(mem1_txt, sizeof(mem1_txt), "MEM1: %8d / %8d", SYSMEM1_SIZE - SYS_GetArena1Size(), SYSMEM1_SIZE);
@@ -1008,17 +1010,6 @@ static void gx_set_rotation(void *data, unsigned orientation)
    gx_video_t *gx = (gx_video_t*)data;
    g_orientation = orientation;
    gx->should_resize = true;
-}
-
-static bool gx_set_shader(void *data, enum rarch_shader_type type, const char *path)
-{
-   (void)data;
-   (void)type;
-   (void)path;
-   (void)index;
-
-   RARCH_WARN("Shader support is not implemented for GX.\n");
-   return false;
 }
 
 static void gx_set_texture_frame(void *data, const void *frame,

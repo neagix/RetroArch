@@ -197,12 +197,7 @@ static void gfx_ctx_set_resize(unsigned width, unsigned height)
 static void gfx_ctx_update_window_title(void)
 {
    char buf[128];
-#if 0
-   if (gfx_get_fps(buf, sizeof(buf), false))
-      RARCH_LOG("%s.\n", buf);
-#else
    gfx_get_fps(buf, sizeof(buf), false);
-#endif
 }
 
 static bool gfx_ctx_set_video_mode(
@@ -241,8 +236,10 @@ static gfx_ctx_proc_t gfx_ctx_get_proc_address(const char *symbol)
    return ret;
 }
 
-static bool gfx_ctx_bind_api(enum gfx_ctx_api api)
+static bool gfx_ctx_bind_api(enum gfx_ctx_api api, unsigned major, unsigned minor)
 {
+   (void)major;
+   (void)minor;
    g_api = api;
    return api == GFX_CTX_OPENGL_ES_API;
 }

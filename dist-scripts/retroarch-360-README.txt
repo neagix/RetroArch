@@ -1,9 +1,18 @@
 ------------------------------------------------------------------------------
-RETROARCH 360 - 0.9.9
+RETROARCH 360 - 0.9.9.3
 ------------------------------------------------------------------------------
 RetroConsole Level: 2
 Author: Themaister, Squarepusher/Twin Aphex
+Supports libretro GL: No
 ------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+IMPORTANT NOTES ABOUT THIS RELEASE
+------------------------------------------------------------------------------
+* (360) Removed shader system for this release - will be re-added in a future 0.9.9 point release. The main problem is that on Xbox 360, all our render targets need to fit inside 10MB of EDRAM - which is just pathetic if you want to have any FBO scaling options similar to what can be done on PS3. I'll be looking at either tiled rendering or just implementing the same 'hack' I did before (where I forcibly set the maximum source framebuffer resolution at 512x512 for two-pass shaders and hoped nobody would notice so I could stay within the confines of the 10MB of EDRAM for render targets). For now, the PS3 port is way superior than the 360 port in the graphics stakes due to this 10MB EDRAM limitation for render targets.
+
+Hopefully an alternative will be implemented by the time 0.9.9.1 rolls out.
+
+* Custom Ratio mode is currently broken. 'Path Options' is currently unimplemented.
 
 ------------------------------------------------------------------------------
 HOW TO INSTALL THIS
@@ -20,11 +29,11 @@ On first startup, RetroArch will select one of the dozen or so
 emulator/game cores. The name of the core currently loaded will be 
 shown at the bottom side of the screen.
 
-You can now select a ROM that this core supports and load it in the Filebrowser.
+You can now select a data file (ie. a game executable and/or a ROM) that
+this core supports and load it in the Filebrowser.
 
-To select a different core - go to 'Change Libretro core' in the Main Menu. 
-Press A to go to a filebrowser where you can select a different core. Press A 
-to switch to the emulator/game core.
+To select a different core - go to 'Core' in the Main Menu. 
+Select a core and then press X to switch to the emulator/game core.
 
 ------------------------------------------------------------------------------
 INGAME CONTROLS
@@ -41,7 +50,7 @@ RStick Left + RT                 - Decrease save state slot
 Rtick Right + RT                 - Increase save state slot
 RStick Up + RT                   - Load selected save state slot
 RStick Down + RT                 - Save selected save state slot
-Right Thumb + Left Thumb         - Go back to 'Menu'/'Quick Menu'
+Right Thumb + Left Thumb         - Go back to 'Menu'
 
 ------------------------------------------------------------------------------
 WHAT IS RETROARCH?
@@ -126,19 +135,20 @@ without these optimizations).
 ------------------------------------------------------------------------------
 WHAT EXTENSIONS ARE SUPPORTED BY EACH CORE
 ------------------------------------------------------------------------------
-- Prboom               WAD|wad
-- SNES9x Next          smc|fig|sfc|gd3|gd7|dx2|bsx|swc|zip|SMC|FIG|SFC|BSX|GD3|
-                       GD7|DX2|SWC
-- Genesis Plus GX      md|smd|bin|gen|zip|MD|SMD|bin|GEN|ZIP|sms|SMS|gg|GG|sg|SG|
-                       cue|CUE
-- VBA Next             GBA|gba
-- FCEUmm               nes|NES|unif|UNIF
-- NEStopia             nes|NES|fds|FDS
-- Gambatte             gb|gbc|dmg|zip|GB|GBC|DMG|ZIP
-- Final Burn Alpha     zip|ZIP
-- Mednafen PCE         pce|PCE|cue|CUE
-- Mednafen Wonderswan  ws|WS|wsc|WSC
-- Mednafen NGP         ngp|NGP
+- Prboom               wad
+- Tyrquake             pak
+- SNES9x Next          smc|fig|sfc|gd3|gd7|dx2|bsx|swc
+- Genesis Plus GX      md|smd|bin|gen|bin|sms|gg|sg|cue
+- NXEngine/Cave Story  exe
+- VBA Next             gba
+- FCEUmm               nes|unif
+- NEStopia             nes|fds
+- Gambatte             gb|gbc|dmg
+- Final Burn Alpha     zip
+- Mednafen PCE         pce|cue
+- Mednafen Wonderswan  ws|wsc
+- Mednafen NGP         ngp
+- Mednafen VB          vb
 
 ------------------------------------------------------------------------------
 ZIP SUPPORT
@@ -190,7 +200,7 @@ Websites
 ------------------------------------------------------------------------------
 Twitter:                   http://twitter.com/libretro
 Source:                    http://github.com/libretro
-Homepage:                  http://www.libretro.org
+Homepage:                  http://www.libretro.com
 IRC:                       #retroarch (freenode)
 
 ------------------------------------------------------------------------------

@@ -24,12 +24,14 @@
 #include "rgui.h"
 #include "utils/file_list.h"
 #include "../../general.h"
+#include "../../file_ext.h"
 #include "../../gfx/gfx_common.h"
 #include "../../config.def.h"
 #include "../../file.h"
 #include "../../dynamic.h"
 #include "../../compat/posix_string.h"
 #include "../../gfx/shader_parse.h"
+#include "../../performance.h"
 
 #ifdef HAVE_OPENGL
 #include "../../gfx/gl_common.h"
@@ -164,16 +166,21 @@ static void init_font(rgui_handle_t *rgui, const uint8_t *font_bmp_buf)
    rgui->font = font;
 }
 
-static void rgui_flush_menu_stack(rgui_handle_t *rgui)
+static void rgui_flush_menu_stack_type(rgui_handle_t *rgui, unsigned final_type)
 {
    rgui->need_refresh = true;
    unsigned type = 0;
    rgui_list_get_last(rgui->menu_stack, NULL, &type);
-   while (type != RGUI_SETTINGS)
+   while (type != final_type)
    {
       rgui_list_pop(rgui->menu_stack, &rgui->selection_ptr);
       rgui_list_get_last(rgui->menu_stack, NULL, &type);
    }
+}
+
+static void rgui_flush_menu_stack(rgui_handle_t *rgui)
+{
+   rgui_flush_menu_stack_type(rgui, RGUI_SETTINGS);
 }
 
 static bool menu_type_is_settings(unsigned type)
@@ -201,6 +208,20 @@ static bool menu_type_is_shader_browser(unsigned type)
 }
 #endif
 
+static bool menu_type_is_directory_browser(unsigned type)
+{
+   return type == RGUI_BROWSER_DIR_PATH ||
+#ifdef HAVE_SHADER_MANAGER
+      type == RGUI_SHADER_DIR_PATH ||
+#endif
+      type == RGUI_SAVESTATE_DIR_PATH ||
+      type == RGUI_SAVEFILE_DIR_PATH ||
+#ifdef HAVE_OVERLAY
+      type == RGUI_OVERLAY_DIR_PATH ||
+#endif
+      type == RGUI_SYSTEM_DIR_PATH;
+}
+
 static void rgui_settings_populate_entries(rgui_handle_t *rgui);
 
 rgui_handle_t *rgui_init(void)
@@ -225,7 +246,6 @@ rgui_handle_t *rgui_init(void)
       /* TODO - should be refactored - perhaps don't do rarch_fail but instead
        * exit program */
       g_extern.lifecycle_mode_state &= ~((1ULL << MODE_MENU) | (1ULL << MODE_GAME));
-      g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
       return NULL;
    }
 
@@ -246,6 +266,10 @@ rgui_handle_t *rgui_init(void)
       aspectratio_lut[ASPECT_RATIO_CUSTOM].value =
          (float)custom->width / custom->height;
    }
+   else if (DEFAULT_ASPECT_RATIO > 0.0f)
+      aspectratio_lut[ASPECT_RATIO_CUSTOM].value = DEFAULT_ASPECT_RATIO;
+   else
+      aspectratio_lut[ASPECT_RATIO_CUSTOM].value = 4.0f / 3.0f; // Something arbitrary
 
    return rgui;
 }
@@ -394,6 +418,10 @@ static void render_text(rgui_handle_t *rgui)
       rgui->selection_ptr - TERM_HEIGHT / 2 : 0;
    size_t end = rgui->selection_ptr + TERM_HEIGHT <= rgui->selection_buf->size ?
       rgui->selection_ptr + TERM_HEIGHT : rgui->selection_buf->size;
+   
+   // Do not scroll if all items are visible.
+   if (rgui->selection_buf->size <= TERM_HEIGHT)
+      begin = 0;
 
    if (end - begin > TERM_HEIGHT)
       end = begin + TERM_HEIGHT;
@@ -433,6 +461,24 @@ static void render_text(rgui_handle_t *rgui)
       snprintf(title, sizeof(title), "MENU %s", dir);
    else if (menu_type == RGUI_SETTINGS_OPEN_HISTORY)
       strlcpy(title, "LOAD HISTORY", sizeof(title));
+#ifdef HAVE_OVERLAY
+   else if (menu_type == RGUI_SETTINGS_OVERLAY_PRESET)
+      snprintf(title, sizeof(title), "OVERLAY %s", dir);
+#endif
+   else if (menu_type == RGUI_BROWSER_DIR_PATH)
+      snprintf(title, sizeof(title), "BROWSER DIR %s", dir);
+   else if (menu_type == RGUI_SHADER_DIR_PATH)
+      snprintf(title, sizeof(title), "SHADER DIR %s", dir);
+   else if (menu_type == RGUI_SAVESTATE_DIR_PATH)
+      snprintf(title, sizeof(title), "SAVESTATE DIR %s", dir);
+   else if (menu_type == RGUI_SAVEFILE_DIR_PATH)
+      snprintf(title, sizeof(title), "SAVEFILE DIR %s", dir);
+#ifdef HAVE_OVERLAY
+   else if (menu_type == RGUI_OVERLAY_DIR_PATH)
+      snprintf(title, sizeof(title), "OVERLAY DIR %s", dir);
+#endif
+   else if (menu_type == RGUI_SYSTEM_DIR_PATH)
+      snprintf(title, sizeof(title), "SYSTEM DIR %s", dir);
    else
    {
       const char *core_name = rgui->info.library_name;
@@ -461,11 +507,7 @@ static void render_text(rgui_handle_t *rgui)
    if (!core_version)
       core_version = "";
 
-#ifndef __BLACKBERRY_QNX__
    snprintf(title_msg, sizeof(title_msg), "%s - %s %s", PACKAGE_VERSION, core_name, core_version);
-#else
-   snprintf(title_msg, sizeof(title_msg), "%s %s", core_name, core_version);
-#endif
    blit_line(rgui, TERM_START_X + 15, (TERM_HEIGHT * FONT_HEIGHT_STRIDE) + TERM_START_Y + 2, title_msg, true);
 
    unsigned x = TERM_START_X;
@@ -502,12 +544,22 @@ static void render_text(rgui_handle_t *rgui)
       }
       else
 #endif
-      if (menu_type == RGUI_SETTINGS_CORE || menu_type == RGUI_SETTINGS_DISK_APPEND)
+      if (menu_type == RGUI_SETTINGS_CORE ||
+#ifdef HAVE_OVERLAY
+            menu_type == RGUI_SETTINGS_OVERLAY_PRESET ||
+#endif
+            menu_type == RGUI_SETTINGS_DISK_APPEND ||
+            menu_type_is_directory_browser(menu_type))
       {
          if (type == RGUI_FILE_PLAIN)
          {
             strlcpy(type_str, "(FILE)", sizeof(type_str));
             w = 6;
+         }
+         else if (type == RGUI_FILE_USE_DIRECTORY)
+         {
+            *type_str = '\0';
+            w = 0;
          }
          else
          {
@@ -545,11 +597,40 @@ static void render_text(rgui_handle_t *rgui)
                snprintf(type_str, sizeof(type_str), "%d", g_extern.console.screen.gamma_correction);
                break;
             case RGUI_SETTINGS_VIDEO_VSYNC:
-               snprintf(type_str, sizeof(type_str), g_settings.video.vsync ? "ON" : "OFF");
+               strlcpy(type_str, g_settings.video.vsync ? "ON" : "OFF", sizeof(type_str));
                break;
             case RGUI_SETTINGS_VIDEO_HARD_SYNC:
-               snprintf(type_str, sizeof(type_str), g_settings.video.hard_sync ? "ON" : "OFF");
+               strlcpy(type_str, g_settings.video.hard_sync ? "ON" : "OFF", sizeof(type_str));
                break;
+            case RGUI_SETTINGS_VIDEO_BLACK_FRAME_INSERTION:
+               strlcpy(type_str, g_settings.video.black_frame_insertion ? "ON" : "OFF", sizeof(type_str));
+               break;
+            case RGUI_SETTINGS_VIDEO_SWAP_INTERVAL:
+               snprintf(type_str, sizeof(type_str), "%u", g_settings.video.swap_interval);
+               break;
+            case RGUI_SETTINGS_VIDEO_WINDOW_SCALE_X:
+               snprintf(type_str, sizeof(type_str), "%.1fx", g_settings.video.xscale);
+               break;
+            case RGUI_SETTINGS_VIDEO_WINDOW_SCALE_Y:
+               snprintf(type_str, sizeof(type_str), "%.1fx", g_settings.video.yscale);
+               break;
+            case RGUI_SETTINGS_VIDEO_CROP_OVERSCAN:
+               strlcpy(type_str, g_settings.video.crop_overscan ? "ON" : "OFF", sizeof(type_str));
+               break;
+            case RGUI_SETTINGS_VIDEO_HARD_SYNC_FRAMES:
+               snprintf(type_str, sizeof(type_str), "%u", g_settings.video.hard_sync_frames);
+               break;
+            case RGUI_SETTINGS_VIDEO_REFRESH_RATE_AUTO:
+            {
+               double refresh_rate = 0.0;
+               double deviation = 0.0;
+               unsigned sample_points = 0;
+               if (driver_monitor_fps_statistics(&refresh_rate, &deviation, &sample_points))
+                  snprintf(type_str, sizeof(type_str), "%.3f Hz (%.1f%% dev, %u samples)", refresh_rate, 100.0 * deviation, sample_points);
+               else
+                  strlcpy(type_str, "N/A", sizeof(type_str));
+               break;
+            }
             case RGUI_SETTINGS_VIDEO_INTEGER_SCALE:
                strlcpy(type_str, g_settings.video.scale_integer ? "ON" : "OFF", sizeof(type_str));
                break;
@@ -579,6 +660,9 @@ static void render_text(rgui_handle_t *rgui)
             case RGUI_SETTINGS_REWIND_GRANULARITY:
                snprintf(type_str, sizeof(type_str), "%u", g_settings.rewind_granularity);
                break;
+            case RGUI_SETTINGS_CONFIG_SAVE_ON_EXIT:
+               strlcpy(type_str, g_extern.config_save_on_exit ? "ON" : "OFF", sizeof(type_str));
+               break;
             case RGUI_SETTINGS_SRAM_AUTOSAVE:
                strlcpy(type_str, g_settings.autosave_interval ? "ON" : "OFF", sizeof(type_str));
                break;
@@ -599,22 +683,42 @@ static void render_text(rgui_handle_t *rgui)
                snprintf(type_str, sizeof(type_str), (g_extern.lifecycle_mode_state & (1ULL << MODE_FPS_DRAW)) ? "ON" : "OFF");
                break;
             case RGUI_BROWSER_DIR_PATH:
-               strlcpy(type_str, g_settings.rgui_browser_directory, sizeof(type_str));
+               if (*g_settings.rgui_browser_directory)
+                  strlcpy(type_str, g_settings.rgui_browser_directory, sizeof(type_str));
+               else
+                  strlcpy(type_str, "<default>", sizeof(type_str));
                break;
             case RGUI_SAVEFILE_DIR_PATH:
-               strlcpy(type_str, g_extern.savefile_dir, sizeof(type_str));
+               if (*g_extern.savefile_dir)
+                  strlcpy(type_str, g_extern.savefile_dir, sizeof(type_str));
+               else
+                  strlcpy(type_str, "<ROM dir>", sizeof(type_str));
                break;
+#ifdef HAVE_OVERLAY
+            case RGUI_OVERLAY_DIR_PATH:
+               if (*g_extern.overlay_dir)
+                  strlcpy(type_str, g_extern.overlay_dir, sizeof(type_str));
+               else
+                  strlcpy(type_str, "<default>", sizeof(type_str));
+               break;
+#endif
             case RGUI_SAVESTATE_DIR_PATH:
-               strlcpy(type_str, g_extern.savestate_dir, sizeof(type_str));
+               if (*g_extern.savestate_dir)
+                  strlcpy(type_str, g_extern.savestate_dir, sizeof(type_str));
+               else
+                  strlcpy(type_str, "<ROM dir>", sizeof(type_str));
                break;
             case RGUI_SHADER_DIR_PATH:
-               strlcpy(type_str, g_settings.video.shader_dir, sizeof(type_str));
+               if (*g_settings.video.shader_dir)
+                  strlcpy(type_str, g_settings.video.shader_dir, sizeof(type_str));
+               else
+                  strlcpy(type_str, "<default>", sizeof(type_str));
                break;
             case RGUI_SYSTEM_DIR_PATH:
-               strlcpy(type_str, g_settings.system_directory, sizeof(type_str));
-               break;
-            case RGUI_CONFIG_PATH:
-               strlcpy(type_str, g_extern.config_path, sizeof(type_str));
+               if (*g_settings.system_directory)
+                  strlcpy(type_str, g_settings.system_directory, sizeof(type_str));
+               else
+                  strlcpy(type_str, "<ROM dir>", sizeof(type_str));
                break;
             case RGUI_SETTINGS_DISK_INDEX:
             {
@@ -646,13 +750,28 @@ static void render_text(rgui_handle_t *rgui)
             case RGUI_SETTINGS_OPTIONS:
                strlcpy(type_str, "...", sizeof(type_str));
                break;
-            case RGUI_SETTINGS_BIND_PLAYER:
-               {
-                  char number[10];
-                  snprintf(number, sizeof(number), "#%d", port + 1);
-                  strlcpy(type_str, number, sizeof(type_str));
-               }
+#ifdef HAVE_OVERLAY
+            case RGUI_SETTINGS_OVERLAY_PRESET:
+               strlcpy(type_str, path_basename(g_settings.input.overlay), sizeof(type_str));
                break;
+
+            case RGUI_SETTINGS_OVERLAY_OPACITY:
+            {
+               snprintf(type_str, sizeof(type_str), "%.2f", g_settings.input.overlay_opacity);
+               break;
+            }
+
+            case RGUI_SETTINGS_OVERLAY_SCALE:
+            {
+               snprintf(type_str, sizeof(type_str), "%.2f", g_settings.input.overlay_scale);
+               break;
+            }
+#endif
+            case RGUI_SETTINGS_BIND_PLAYER:
+            {
+               snprintf(type_str, sizeof(type_str), "#%d", port + 1);
+               break;
+            }
             case RGUI_SETTINGS_BIND_DEVICE:
             {
                int map = g_settings.input.joypad_map[port];
@@ -695,6 +814,9 @@ static void render_text(rgui_handle_t *rgui)
                      break;
                   case ANALOG_DPAD_LSTICK:
                      strlcpy(type_str, "Left Stick", sizeof(type_str));
+                     break;
+                  case ANALOG_DPAD_DUALANALOG:
+                     strlcpy(type_str, "Dual Analog", sizeof(type_str));
                      break;
                   case ANALOG_DPAD_RSTICK:
                      strlcpy(type_str, "Right Stick", sizeof(type_str));
@@ -847,6 +969,15 @@ static int rgui_settings_toggle_setting(rgui_handle_t *rgui, unsigned setting, r
          else if (action == RGUI_ACTION_START)
             g_settings.rewind_granularity = 1;
          break;
+      case RGUI_SETTINGS_CONFIG_SAVE_ON_EXIT:
+         if (action == RGUI_ACTION_OK || action == RGUI_ACTION_RIGHT 
+               || action == RGUI_ACTION_LEFT)
+         {
+            g_extern.config_save_on_exit = !g_extern.config_save_on_exit;
+         }
+         else if (action == RGUI_ACTION_START)
+            g_extern.config_save_on_exit = true;
+         break;
 #if defined(HAVE_THREADS) && !defined(RARCH_CONSOLE)
       case RGUI_SETTINGS_SRAM_AUTOSAVE:
          if (action == RGUI_ACTION_OK || action == RGUI_ACTION_RIGHT || action == RGUI_ACTION_LEFT)
@@ -885,25 +1016,16 @@ static int rgui_settings_toggle_setting(rgui_handle_t *rgui, unsigned setting, r
       case RGUI_SETTINGS_SCREENSHOT:
          if (action == RGUI_ACTION_OK)
          {
-            const void *data = g_extern.frame_cache.data;
-            unsigned width   = g_extern.frame_cache.width;
-            unsigned height  = g_extern.frame_cache.height;
-            int pitch        = g_extern.frame_cache.pitch;
-
-#ifdef RARCH_CONSOLE
-            const char *screenshot_dir = default_paths.port_dir;
-#else
-            const char *screenshot_dir = g_settings.screenshot_directory;
-#endif
-
-            // Negative pitch is needed as screenshot takes bottom-up,
-            // but we use top-down.
-            bool r = screenshot_dump(screenshot_dir,
-                  (const uint8_t*)data + (height - 1) * pitch, 
-                  width, height, -pitch, false);
-
-            msg_queue_push(g_extern.msg_queue,
-                  r ? "Screenshot saved." : "Screenshot failed to save.", 1, 90);
+            // Render a clean frame to avoid taking screnshot of RGUI.
+            if (g_settings.video.gpu_screenshot ||
+                  g_extern.system.hw_render_callback.context_type != RETRO_HW_CONTEXT_NONE)
+            {
+               if (driver.video_poke && driver.video_poke->set_texture_enable)
+                  driver.video_poke->set_texture_enable(driver.video_data, false, false);
+               if (driver.video)
+                  rarch_render_cached_frame();
+            }
+            rarch_take_screenshot();
          }
          break;
 #endif
@@ -961,12 +1083,11 @@ static int rgui_settings_toggle_setting(rgui_handle_t *rgui, unsigned setting, r
       case RGUI_SETTINGS_RESTART_EMULATOR:
          if (action == RGUI_ACTION_OK)
          {
-#ifdef GEKKO
+#if defined(GEKKO) && defined(HW_RVL)
             fill_pathname_join(g_extern.fullpath, default_paths.core_dir, SALAMANDER_FILE,
                   sizeof(g_extern.fullpath));
 #endif
             g_extern.lifecycle_mode_state &= ~(1ULL << MODE_GAME);
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
             g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN);
             return -1;
          }
@@ -985,10 +1106,101 @@ static int rgui_settings_toggle_setting(rgui_handle_t *rgui, unsigned setting, r
          if (action == RGUI_ACTION_OK)
          {
             g_extern.lifecycle_mode_state &= ~(1ULL << MODE_GAME);
-            g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
             return -1;
          }
          break;
+#ifdef HAVE_OVERLAY
+      case RGUI_SETTINGS_OVERLAY_PRESET:
+         switch (action)
+         {
+            case RGUI_ACTION_OK:
+               rgui_list_push(rgui->menu_stack, g_extern.overlay_dir, setting, rgui->selection_ptr);
+               rgui->selection_ptr = 0;
+               rgui->need_refresh = true;
+               break;
+
+#ifndef __QNX__ // FIXME: Why ifndef QNX?
+            case RGUI_ACTION_START:
+               if (driver.overlay)
+                  input_overlay_free(driver.overlay);
+               driver.overlay = NULL;
+               *g_settings.input.overlay = '\0';
+               break;
+#endif
+
+            default:
+               break;
+         }
+         break;
+
+      case RGUI_SETTINGS_OVERLAY_OPACITY:
+      {
+         bool changed = true;
+         switch (action)
+         {
+            case RGUI_ACTION_LEFT:
+               g_settings.input.overlay_opacity -= 0.01f;
+               break;
+
+            case RGUI_ACTION_RIGHT:
+            case RGUI_ACTION_OK:
+               g_settings.input.overlay_opacity += 0.01f;
+               break;
+
+            case RGUI_ACTION_START:
+               g_settings.input.overlay_opacity = 1.0f;
+               break;
+
+            default:
+               changed = false;
+               break;
+         }
+
+         if (g_settings.input.overlay_opacity < 0.0f)
+            g_settings.input.overlay_opacity = 0.0f;
+         else if (g_settings.input.overlay_opacity > 1.0f)
+            g_settings.input.overlay_opacity = 1.0f;
+
+         if (changed && driver.overlay)
+            input_overlay_set_alpha_mod(driver.overlay,
+                  g_settings.input.overlay_opacity);
+         break;
+      }
+
+      case RGUI_SETTINGS_OVERLAY_SCALE:
+      {
+         bool changed = true;
+         switch (action)
+         {
+            case RGUI_ACTION_LEFT:
+               g_settings.input.overlay_scale -= 0.01f;
+               break;
+
+            case RGUI_ACTION_RIGHT:
+            case RGUI_ACTION_OK:
+               g_settings.input.overlay_scale += 0.01f;
+               break;
+
+            case RGUI_ACTION_START:
+               g_settings.input.overlay_scale = 1.0f;
+               break;
+
+            default:
+               changed = false;
+               break;
+         }
+
+         if (g_settings.input.overlay_scale < 0.01f) // Avoid potential divide by zero.
+            g_settings.input.overlay_scale = 0.01f;
+         else if (g_settings.input.overlay_scale > 2.0f)
+            g_settings.input.overlay_scale = 2.0f;
+
+         if (changed && driver.overlay)
+            input_overlay_set_scale_factor(driver.overlay,
+                  g_settings.input.overlay_scale);
+         break;
+      }
+#endif
       // controllers
       case RGUI_SETTINGS_BIND_PLAYER:
          if (action == RGUI_ACTION_START)
@@ -1178,6 +1390,35 @@ static int rgui_settings_toggle_setting(rgui_handle_t *rgui, unsigned setting, r
                driver.input->set_keybinds(driver.input_data, g_settings.input.device[setting - RGUI_SETTINGS_BIND_UP], port,
                      rgui_controller_lut[setting - RGUI_SETTINGS_BIND_UP], keybind_action); 
          }
+      case RGUI_BROWSER_DIR_PATH:
+         if (action == RGUI_ACTION_START)
+         {
+            *g_settings.rgui_browser_directory = '\0';
+            *rgui->base_path = '\0';
+         }
+         break;
+      case RGUI_SAVEFILE_DIR_PATH:
+         if (action == RGUI_ACTION_START)
+            *g_extern.savefile_dir = '\0';
+         break;
+#ifdef HAVE_OVERLAY
+      case RGUI_OVERLAY_DIR_PATH:
+         if (action == RGUI_ACTION_START)
+            *g_extern.overlay_dir = '\0';
+         break;
+#endif
+      case RGUI_SAVESTATE_DIR_PATH:
+         if (action == RGUI_ACTION_START)
+            *g_extern.savestate_dir = '\0';
+         break;
+      case RGUI_SHADER_DIR_PATH:
+         if (action == RGUI_ACTION_START)
+            *g_settings.video.shader_dir = '\0';
+         break;
+      case RGUI_SYSTEM_DIR_PATH:
+         if (action == RGUI_ACTION_START)
+            *g_settings.system_directory = '\0';
+         break;
       default:
          break;
    }
@@ -1204,6 +1445,7 @@ static void rgui_settings_options_populate_entries(rgui_handle_t *rgui)
    rgui_list_clear(rgui->selection_buf);
    rgui_list_push(rgui->selection_buf, "Rewind", RGUI_SETTINGS_REWIND_ENABLE, 0);
    rgui_list_push(rgui->selection_buf, "Rewind Granularity", RGUI_SETTINGS_REWIND_GRANULARITY, 0);
+   rgui_list_push(rgui->selection_buf, "Config Save On Exit", RGUI_SETTINGS_CONFIG_SAVE_ON_EXIT, 0);
 #if defined(HAVE_THREADS) && !defined(RARCH_CONSOLE)
    rgui_list_push(rgui->selection_buf, "SRAM Autosave", RGUI_SETTINGS_SRAM_AUTOSAVE, 0);
 #endif
@@ -1281,12 +1523,21 @@ static void rgui_settings_video_options_populate_entries(rgui_handle_t *rgui)
    rgui_list_push(rgui->selection_buf, "Integer Scale", RGUI_SETTINGS_VIDEO_INTEGER_SCALE, 0);
    rgui_list_push(rgui->selection_buf, "Aspect Ratio", RGUI_SETTINGS_VIDEO_ASPECT_RATIO, 0);
    rgui_list_push(rgui->selection_buf, "Custom Ratio", RGUI_SETTINGS_CUSTOM_VIEWPORT, 0);
-#ifndef RARCH_PERFORMANCE_MODE
+#if !defined(RARCH_CONSOLE) && !defined(RARCH_MOBILE)
    rgui_list_push(rgui->selection_buf, "Toggle Fullscreen", RGUI_SETTINGS_TOGGLE_FULLSCREEN, 0);
 #endif
    rgui_list_push(rgui->selection_buf, "Rotation", RGUI_SETTINGS_VIDEO_ROTATION, 0);
    rgui_list_push(rgui->selection_buf, "VSync", RGUI_SETTINGS_VIDEO_VSYNC, 0);
    rgui_list_push(rgui->selection_buf, "Hard GPU Sync", RGUI_SETTINGS_VIDEO_HARD_SYNC, 0);
+   rgui_list_push(rgui->selection_buf, "Hard GPU Sync Frames", RGUI_SETTINGS_VIDEO_HARD_SYNC_FRAMES, 0);
+   rgui_list_push(rgui->selection_buf, "Black Frame Insertion", RGUI_SETTINGS_VIDEO_BLACK_FRAME_INSERTION, 0);
+   rgui_list_push(rgui->selection_buf, "VSync Swap Interval", RGUI_SETTINGS_VIDEO_SWAP_INTERVAL, 0);
+#if !defined(RARCH_CONSOLE) && !defined(RARCH_MOBILE)
+   rgui_list_push(rgui->selection_buf, "Windowed Scale (X)", RGUI_SETTINGS_VIDEO_WINDOW_SCALE_X, 0);
+   rgui_list_push(rgui->selection_buf, "Windowed Scale (Y)", RGUI_SETTINGS_VIDEO_WINDOW_SCALE_Y, 0);
+#endif
+   rgui_list_push(rgui->selection_buf, "Crop Overscan (reload)", RGUI_SETTINGS_VIDEO_CROP_OVERSCAN, 0);
+   rgui_list_push(rgui->selection_buf, "Estimated Monitor FPS", RGUI_SETTINGS_VIDEO_REFRESH_RATE_AUTO, 0);
 }
 
 #ifdef HAVE_SHADER_MANAGER
@@ -1633,14 +1884,12 @@ static int video_option_toggle_setting(rgui_handle_t *rgui, unsigned setting, rg
             driver.video_poke->set_aspect_ratio(driver.video_data, g_settings.video.aspect_ratio_idx);
          break;
 
-#ifndef RARCH_PERFORMANCE_MODE
       case RGUI_SETTINGS_TOGGLE_FULLSCREEN:
          if (action == RGUI_ACTION_OK)
             rarch_set_fullscreen(!g_settings.video.fullscreen);
          break;
-#endif
 
-#ifdef HW_RVL
+#ifdef GEKKO
       case RGUI_SETTINGS_VIDEO_RESOLUTION:
          if (action == RGUI_ACTION_LEFT)
          {
@@ -1654,9 +1903,11 @@ static int video_option_toggle_setting(rgui_handle_t *rgui, unsigned setting, rg
          {
             if (rgui_current_gx_resolution < GX_RESOLUTIONS_LAST - 1)
             {
+#ifdef HW_RVL
                if ((rgui_current_gx_resolution + 1) > GX_RESOLUTIONS_640_480)
                   if (CONF_GetVideo() != CONF_VIDEO_PAL)
                      return 0;
+#endif
 
                rgui_current_gx_resolution++;
                gx_set_video_mode(rgui_gx_resolutions[rgui_current_gx_resolution][0],
@@ -1664,7 +1915,8 @@ static int video_option_toggle_setting(rgui_handle_t *rgui, unsigned setting, rg
             }
          }
          break;
-
+#endif
+#ifdef HW_RVL
       case RGUI_SETTINGS_VIDEO_SOFT_FILTER:
          if (g_extern.lifecycle_mode_state & (1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE))
             g_extern.lifecycle_mode_state &= ~(1ULL << MODE_VIDEO_SOFT_FILTER_ENABLE);
@@ -1712,6 +1964,154 @@ static int video_option_toggle_setting(rgui_handle_t *rgui, unsigned setting, rg
          }
          break;
 
+      case RGUI_SETTINGS_VIDEO_BLACK_FRAME_INSERTION:
+         switch (action)
+         {
+            case RGUI_ACTION_START:
+               g_settings.video.black_frame_insertion = false;
+               break;
+
+            case RGUI_ACTION_LEFT:
+            case RGUI_ACTION_RIGHT:
+            case RGUI_ACTION_OK:
+               g_settings.video.black_frame_insertion = !g_settings.video.black_frame_insertion;
+               break;
+
+            default:
+               break;
+         }
+         break;
+
+      case RGUI_SETTINGS_VIDEO_CROP_OVERSCAN:
+         switch (action)
+         {
+            case RGUI_ACTION_START:
+               g_settings.video.crop_overscan = true;
+               break;
+
+            case RGUI_ACTION_LEFT:
+            case RGUI_ACTION_RIGHT:
+            case RGUI_ACTION_OK:
+               g_settings.video.crop_overscan = !g_settings.video.crop_overscan;
+               break;
+
+            default:
+               break;
+         }
+         break;
+
+      case RGUI_SETTINGS_VIDEO_WINDOW_SCALE_X:
+      case RGUI_SETTINGS_VIDEO_WINDOW_SCALE_Y:
+      {
+         float *scale = setting == RGUI_SETTINGS_VIDEO_WINDOW_SCALE_X ? &g_settings.video.xscale : &g_settings.video.yscale;
+         float old_scale = *scale;
+
+         switch (action)
+         {
+            case RGUI_ACTION_START:
+               *scale = 3.0f;
+               break;
+
+            case RGUI_ACTION_LEFT:
+               *scale -= 1.0f;
+               break;
+
+            case RGUI_ACTION_RIGHT:
+               *scale += 1.0f;
+               break;
+
+            default:
+               break;
+         }
+
+         *scale = roundf(*scale);
+         *scale = max(*scale, 1.0f);
+
+         if (old_scale != *scale && !g_settings.video.fullscreen)
+            rarch_set_fullscreen(g_settings.video.fullscreen); // Reinit video driver.
+
+         break;
+      }
+
+      case RGUI_SETTINGS_VIDEO_SWAP_INTERVAL:
+      {
+         unsigned old = g_settings.video.swap_interval;
+         switch (action)
+         {
+            case RGUI_ACTION_START:
+               g_settings.video.swap_interval = 1;
+               break;
+
+            case RGUI_ACTION_LEFT:
+               g_settings.video.swap_interval--;
+               break;
+
+            case RGUI_ACTION_RIGHT:
+            case RGUI_ACTION_OK:
+               g_settings.video.swap_interval++;
+               break;
+
+            default:
+               break;
+         }
+
+         g_settings.video.swap_interval = min(g_settings.video.swap_interval, 4);
+         g_settings.video.swap_interval = max(g_settings.video.swap_interval, 1);
+         if (old != g_settings.video.swap_interval && driver.video && driver.video_data)
+            video_set_nonblock_state_func(false); // This will update the current swap interval. Since we're in RGUI now, always apply VSync.
+
+         break;
+      }
+
+      case RGUI_SETTINGS_VIDEO_HARD_SYNC_FRAMES:
+         switch (action)
+         {
+            case RGUI_ACTION_START:
+               g_settings.video.hard_sync_frames = 0;
+               break;
+
+            case RGUI_ACTION_LEFT:
+               if (g_settings.video.hard_sync_frames > 0)
+                  g_settings.video.hard_sync_frames--;
+               break;
+
+            case RGUI_ACTION_RIGHT:
+            case RGUI_ACTION_OK:
+               if (g_settings.video.hard_sync_frames < 3)
+                  g_settings.video.hard_sync_frames++;
+               break;
+
+            default:
+               break;
+         }
+         break;
+
+      case RGUI_SETTINGS_VIDEO_REFRESH_RATE_AUTO:
+         switch (action)
+         {
+            case RGUI_ACTION_START:
+               g_extern.measure_data.frame_time_samples_count = 0;
+               break;
+
+            case RGUI_ACTION_OK:
+            {
+               double refresh_rate = 0.0;
+               double deviation = 0.0;
+               unsigned sample_points = 0;
+               if (driver_monitor_fps_statistics(&refresh_rate, &deviation, &sample_points))
+               {
+                  driver_set_monitor_refresh_rate(refresh_rate);
+                  // Incase refresh rate update forced non-block video.
+                  video_set_nonblock_state_func(false);
+               }
+               break;
+            }
+
+            default:
+               break;
+         }
+         break;
+
       default:
          break;
    }
@@ -1728,13 +2128,20 @@ static void rgui_settings_path_populate_entries(rgui_handle_t *rgui)
 #endif
    rgui_list_push(rgui->selection_buf, "Savestate Directory", RGUI_SAVESTATE_DIR_PATH, 0);
    rgui_list_push(rgui->selection_buf, "Savefile Directory", RGUI_SAVEFILE_DIR_PATH, 0);
+#ifdef HAVE_OVERLAY
+   rgui_list_push(rgui->selection_buf, "Overlay Directory", RGUI_OVERLAY_DIR_PATH, 0);
+#endif
    rgui_list_push(rgui->selection_buf, "System Directory", RGUI_SYSTEM_DIR_PATH, 0);
-   rgui_list_push(rgui->selection_buf, "Config File", RGUI_CONFIG_PATH, 0);
 }
 
 static void rgui_settings_controller_populate_entries(rgui_handle_t *rgui)
 {
    rgui_list_clear(rgui->selection_buf);
+#ifdef HAVE_OVERLAY
+   rgui_list_push(rgui->selection_buf, "Overlay Preset", RGUI_SETTINGS_OVERLAY_PRESET, 0);
+   rgui_list_push(rgui->selection_buf, "Overlay Opacity", RGUI_SETTINGS_OVERLAY_OPACITY, 0);
+   rgui_list_push(rgui->selection_buf, "Overlay Scale", RGUI_SETTINGS_OVERLAY_SCALE, 0);
+#endif
    rgui_list_push(rgui->selection_buf, "Player", RGUI_SETTINGS_BIND_PLAYER, 0);
    rgui_list_push(rgui->selection_buf, "Device", RGUI_SETTINGS_BIND_DEVICE, 0);
    rgui_list_push(rgui->selection_buf, "Device Type", RGUI_SETTINGS_BIND_DEVICE_TYPE, 0);
@@ -1996,9 +2403,9 @@ static int rgui_settings_iterate(rgui_handle_t *rgui, rgui_action_t action)
             rgui->selection_ptr = 0;
             rgui->need_refresh = true;
          }
-         else if (type == RGUI_SETTINGS_OPEN_HISTORY && action == RGUI_ACTION_OK)
+         else if ((type == RGUI_SETTINGS_OPEN_HISTORY || menu_type_is_directory_browser(type)) && action == RGUI_ACTION_OK)
          {
-            rgui_list_push(rgui->menu_stack, "", RGUI_SETTINGS_OPEN_HISTORY, rgui->selection_ptr);
+            rgui_list_push(rgui->menu_stack, "", type, rgui->selection_ptr);
             rgui->selection_ptr = 0;
             rgui->need_refresh = true;
          }
@@ -2050,15 +2457,19 @@ static int rgui_settings_iterate(rgui_handle_t *rgui, rgui_action_t action)
 #ifdef HAVE_SHADER_MANAGER
             menu_type_is_shader_browser(menu_type) ||
 #endif
+            menu_type_is_directory_browser(menu_type) ||
+#ifdef HAVE_OVERLAY
+            menu_type == RGUI_SETTINGS_OVERLAY_PRESET ||
+#endif
             menu_type == RGUI_SETTINGS_CORE || menu_type == RGUI_SETTINGS_DISK_APPEND ||
             menu_type == RGUI_SETTINGS_OPEN_HISTORY))
    {
       rgui->need_refresh = false;
-      if ((menu_type == RGUI_SETTINGS_INPUT_OPTIONS))
+      if (menu_type == RGUI_SETTINGS_INPUT_OPTIONS)
          rgui_settings_controller_populate_entries(rgui);
-      else if ((menu_type == RGUI_SETTINGS_PATH_OPTIONS))
+      else if (menu_type == RGUI_SETTINGS_PATH_OPTIONS)
          rgui_settings_path_populate_entries(rgui);
-      else if ((menu_type == RGUI_SETTINGS_OPTIONS))
+      else if (menu_type == RGUI_SETTINGS_OPTIONS)
          rgui_settings_options_populate_entries(rgui);
       else if (menu_type == RGUI_SETTINGS_CORE_OPTIONS)
          rgui_settings_core_options_populate_entries(rgui);
@@ -2169,6 +2580,12 @@ static bool directory_parse(rgui_handle_t *rgui, const char *directory, unsigned
    else if (menu_type_is_shader_browser(menu_type))
       exts = "cg|glsl";
 #endif
+#ifdef HAVE_OVERLAY
+   else if (menu_type == RGUI_SETTINGS_OVERLAY_PRESET)
+      exts = "cfg";
+#endif
+   else if (menu_type_is_directory_browser(menu_type))
+      exts = ""; // we ignore files anyway
    else if (rgui->info.valid_extensions)
    {
       exts = ext_buf;
@@ -2186,9 +2603,15 @@ static bool directory_parse(rgui_handle_t *rgui, const char *directory, unsigned
 
    dir_list_sort(list, true);
 
+   if (menu_type_is_directory_browser(menu_type))
+      rgui_list_push(ctx, "<Use this directory>", RGUI_FILE_USE_DIRECTORY, 0);
+
    for (size_t i = 0; i < list->size; i++)
    {
       bool is_dir = list->elems[i].attr.b;
+
+      if (menu_type_is_directory_browser(menu_type) && !is_dir)
+         continue;
 
 #ifdef HAVE_LIBRETRO_MANAGEMENT
       if (menu_type == RGUI_SETTINGS_CORE && (is_dir || strcasecmp(list->elems[i].data, SALAMANDER_FILE) == 0))
@@ -2299,6 +2722,10 @@ int rgui_iterate(rgui_handle_t *rgui)
 #ifdef HAVE_SHADER_MANAGER
                menu_type_is_shader_browser(type) ||
 #endif
+               menu_type_is_directory_browser(type) ||
+#ifdef HAVE_OVERLAY
+               type == RGUI_SETTINGS_OVERLAY_PRESET ||
+#endif
                type == RGUI_SETTINGS_CORE ||
                type == RGUI_SETTINGS_DISK_APPEND ||
                type == RGUI_FILE_DIRECTORY)
@@ -2330,18 +2757,7 @@ int rgui_iterate(rgui_handle_t *rgui)
                }
 
                // Pop stack until we hit shader manager again.
-               // We don't have to do this in CORE selection because it only
-               // uses one directory.
-               unsigned type = 0;
-               const char *dir = NULL;
-               rgui_list_pop(rgui->menu_stack, &rgui->selection_ptr);
-               rgui_list_get_last(rgui->menu_stack, &dir, &type);
-               while (type != RGUI_SETTINGS_SHADER_OPTIONS)
-               {
-                  rgui_list_pop(rgui->menu_stack, &rgui->selection_ptr);
-                  rgui_list_get_last(rgui->menu_stack, &dir, &type);
-               }
-               rgui->need_refresh = true;
+               rgui_flush_menu_stack_type(rgui, RGUI_SETTINGS_SHADER_OPTIONS);
             }
             else
 #endif
@@ -2364,18 +2780,32 @@ int rgui_iterate(rgui_handle_t *rgui)
 
                // Core selection on non-console just updates directory listing.
                // Will take affect on new ROM load.
-#elif defined(GEKKO)
-               strlcpy(g_settings.libretro, path, sizeof(g_settings.libretro)); // Is this supposed to be here?
+#elif defined(GEKKO) && defined(HW_RVL)
+               rarch_environment_cb(RETRO_ENVIRONMENT_SET_LIBRETRO_PATH, (void*)path);
+
                fill_pathname_join(g_extern.fullpath, default_paths.core_dir,
                      SALAMANDER_FILE, sizeof(g_extern.fullpath));
                g_extern.lifecycle_mode_state &= ~(1ULL << MODE_GAME);
-               g_extern.lifecycle_mode_state |= (1ULL << MODE_EXIT);
                g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN);
                ret = -1;
 #endif
 
                rgui_flush_menu_stack(rgui);
             }
+#ifdef HAVE_OVERLAY
+            else if (menu_type == RGUI_SETTINGS_OVERLAY_PRESET)
+            {
+               fill_pathname_join(g_settings.input.overlay, dir, path, sizeof(g_settings.input.overlay));
+
+               if (driver.overlay)
+                  input_overlay_free(driver.overlay);
+               driver.overlay = input_overlay_new(g_settings.input.overlay);
+               if (!driver.overlay)
+                  RARCH_ERR("Failed to load overlay.\n");
+
+               rgui_flush_menu_stack_type(rgui, RGUI_SETTINGS_INPUT_OPTIONS);
+            }
+#endif
             else if (menu_type == RGUI_SETTINGS_DISK_APPEND)
             {
                char image[PATH_MAX];
@@ -2392,6 +2822,39 @@ int rgui_iterate(rgui_handle_t *rgui)
                load_menu_game_history(rgui->selection_ptr);
                rgui_flush_menu_stack(rgui);
                ret = -1;
+            }
+            else if (menu_type == RGUI_BROWSER_DIR_PATH)
+            {
+               strlcpy(g_settings.rgui_browser_directory, dir, sizeof(g_settings.rgui_browser_directory));
+               strlcpy(rgui->base_path, dir, sizeof(rgui->base_path));
+               rgui_flush_menu_stack_type(rgui, RGUI_SETTINGS_PATH_OPTIONS);
+            }
+            else if (menu_type == RGUI_SAVEFILE_DIR_PATH)
+            {
+               strlcpy(g_extern.savefile_dir, dir, sizeof(g_extern.savefile_dir));
+               rgui_flush_menu_stack_type(rgui, RGUI_SETTINGS_PATH_OPTIONS);
+            }
+#ifdef HAVE_OVERLAY
+            else if (menu_type == RGUI_OVERLAY_DIR_PATH)
+            {
+               strlcpy(g_extern.overlay_dir, dir, sizeof(g_extern.overlay_dir));
+               rgui_flush_menu_stack_type(rgui, RGUI_SETTINGS_PATH_OPTIONS);
+            }
+#endif
+            else if (menu_type == RGUI_SAVESTATE_DIR_PATH)
+            {
+               strlcpy(g_extern.savestate_dir, dir, sizeof(g_extern.savestate_dir));
+               rgui_flush_menu_stack_type(rgui, RGUI_SETTINGS_PATH_OPTIONS);
+            }
+            else if (menu_type == RGUI_SHADER_DIR_PATH)
+            {
+               strlcpy(g_settings.video.shader_dir, dir, sizeof(g_settings.video.shader_dir));
+               rgui_flush_menu_stack_type(rgui, RGUI_SETTINGS_PATH_OPTIONS);
+            }
+            else if (menu_type == RGUI_SYSTEM_DIR_PATH)
+            {
+               strlcpy(g_settings.system_directory, dir, sizeof(g_settings.system_directory));
+               rgui_flush_menu_stack_type(rgui, RGUI_SETTINGS_PATH_OPTIONS);
             }
             else
             {
@@ -2432,6 +2895,10 @@ int rgui_iterate(rgui_handle_t *rgui)
 #ifdef HAVE_SHADER_MANAGER
             menu_type_is_shader_browser(menu_type) ||
 #endif
+            menu_type_is_directory_browser(menu_type) || 
+#ifdef HAVE_OVERLAY
+            menu_type == RGUI_SETTINGS_OVERLAY_PRESET ||
+#endif
             menu_type == RGUI_SETTINGS_CORE ||
             menu_type == RGUI_SETTINGS_OPEN_HISTORY ||
             menu_type == RGUI_SETTINGS_DISK_APPEND))
@@ -2456,44 +2923,6 @@ int rgui_iterate(rgui_handle_t *rgui)
 
    return ret;
 }
-
-static const struct retro_keybind _menu_nav_binds[] = {
-#if defined(HW_RVL)
-   { 0, 0, NULL, 0, GX_GC_UP | GX_GC_LSTICK_UP | GX_GC_RSTICK_UP | GX_CLASSIC_UP | GX_CLASSIC_LSTICK_UP | GX_CLASSIC_RSTICK_UP | GX_WIIMOTE_UP | GX_NUNCHUK_UP, 0 },
-   { 0, 0, NULL, 0, GX_GC_DOWN | GX_GC_LSTICK_DOWN | GX_GC_RSTICK_DOWN | GX_CLASSIC_DOWN | GX_CLASSIC_LSTICK_DOWN | GX_CLASSIC_RSTICK_DOWN | GX_WIIMOTE_DOWN | GX_NUNCHUK_DOWN, 0 },
-   { 0, 0, NULL, 0, GX_GC_LEFT | GX_GC_LSTICK_LEFT | GX_GC_RSTICK_LEFT | GX_CLASSIC_LEFT | GX_CLASSIC_LSTICK_LEFT | GX_CLASSIC_RSTICK_LEFT | GX_WIIMOTE_LEFT | GX_NUNCHUK_LEFT, 0 },
-   { 0, 0, NULL, 0, GX_GC_RIGHT | GX_GC_LSTICK_RIGHT | GX_GC_RSTICK_RIGHT | GX_CLASSIC_RIGHT | GX_CLASSIC_LSTICK_RIGHT | GX_CLASSIC_RSTICK_RIGHT | GX_WIIMOTE_RIGHT | GX_NUNCHUK_RIGHT, 0 },
-   { 0, 0, NULL, 0, GX_GC_A | GX_CLASSIC_A | GX_WIIMOTE_A | GX_WIIMOTE_2, 0 },
-   { 0, 0, NULL, 0, GX_GC_B | GX_CLASSIC_B | GX_WIIMOTE_B | GX_WIIMOTE_1, 0 },
-   { 0, 0, NULL, 0, GX_GC_START | GX_CLASSIC_PLUS | GX_WIIMOTE_PLUS, 0 },
-   { 0, 0, NULL, 0, GX_GC_Z_TRIGGER | GX_CLASSIC_MINUS | GX_WIIMOTE_MINUS, 0 },
-   { 0, 0, NULL, 0, GX_WIIMOTE_HOME | GX_CLASSIC_HOME, 0 },
-#elif defined(HW_DOL)
-   { 0, 0, NULL, 0, GX_GC_UP | GX_GC_LSTICK_UP | GX_GC_RSTICK_UP, 0 },
-   { 0, 0, NULL, 0, GX_GC_DOWN | GX_GC_LSTICK_DOWN | GX_GC_RSTICK_DOWN, 0 },
-   { 0, 0, NULL, 0, GX_GC_LEFT | GX_GC_LSTICK_LEFT | GX_GC_RSTICK_LEFT, 0 },
-   { 0, 0, NULL, 0, GX_GC_RIGHT | GX_GC_LSTICK_RIGHT | GX_GC_RSTICK_RIGHT, 0 },
-   { 0, 0, NULL, 0, GX_GC_A, 0 },
-   { 0, 0, NULL, 0, GX_GC_B, 0 },
-   { 0, 0, NULL, 0, GX_GC_START, 0 },
-   { 0, 0, NULL, 0, GX_GC_Z_TRIGGER, 0 },
-   { 0, 0, NULL, 0, GX_WIIMOTE_HOME, 0 },
-#else
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_UP), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_DOWN), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_LEFT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_RIGHT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_A), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_B), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_START), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RETRO_DEVICE_ID_JOYPAD_SELECT), 0 },
-   { 0, 0, NULL, (enum retro_key)0, (1ULL << RARCH_MENU_TOGGLE), 0 },
-#endif
-};
-
-static const struct retro_keybind *menu_nav_binds[] = {
-   _menu_nav_binds
-};
 
 int rgui_input_postprocess(void *data, uint64_t old_state)
 {
@@ -2525,62 +2954,4 @@ int rgui_input_postprocess(void *data, uint64_t old_state)
    }
 
    return ret;
-}
-
-uint64_t rgui_input(void)
-{
-   uint64_t input_state = 0;
-
-   // FIXME: Very ugly. Should do something more uniform.
-#if defined(RARCH_CONSOLE) || defined(ANDROID)
-   for (unsigned i = 0; i < DEVICE_NAV_LAST; i++)
-      input_state |= driver.input->input_state(driver.input_data, menu_nav_binds, 0,
-            RETRO_DEVICE_JOYPAD, 0, i) ? (1ULL << i) : 0;
-
-   input_state |= driver.input->key_pressed(driver.input_data, RARCH_MENU_TOGGLE) ? (1ULL << DEVICE_NAV_MENU) : 0;
-
-#ifdef HAVE_OVERLAY
-   for (unsigned i = 0; i < DEVICE_NAV_LAST; i++)
-      input_state |= driver.overlay_state & menu_nav_binds[0][i].joykey ? (1ULL << i) : 0;
-#endif
-#else
-   static const int maps[] = {
-      RETRO_DEVICE_ID_JOYPAD_UP,     DEVICE_NAV_UP,
-      RETRO_DEVICE_ID_JOYPAD_DOWN,   DEVICE_NAV_DOWN,
-      RETRO_DEVICE_ID_JOYPAD_LEFT,   DEVICE_NAV_LEFT,
-      RETRO_DEVICE_ID_JOYPAD_RIGHT,  DEVICE_NAV_RIGHT,
-      RETRO_DEVICE_ID_JOYPAD_A,      DEVICE_NAV_A,
-      RETRO_DEVICE_ID_JOYPAD_B,      DEVICE_NAV_B,
-      RETRO_DEVICE_ID_JOYPAD_START,  DEVICE_NAV_START,
-      RETRO_DEVICE_ID_JOYPAD_SELECT, DEVICE_NAV_SELECT,
-   };
-
-   static const struct retro_keybind *binds[] = { g_settings.input.binds[0] };
-
-   for (unsigned i = 0; i < ARRAY_SIZE(maps); i += 2)
-   {
-      input_state |= input_input_state_func(binds,
-            0, RETRO_DEVICE_JOYPAD, 0, maps[i + 0]) ? (1ULL << maps[i + 1]) : 0;
-#ifdef HAVE_OVERLAY
-      input_state |= (driver.overlay_state & (UINT64_C(1) << maps[i + 0])) ? (1ULL << maps[i + 1]) : 0;
-#endif
-   }
-
-   input_state |= input_key_pressed_func(RARCH_MENU_TOGGLE) ? (1ULL << DEVICE_NAV_MENU) : 0;
-#endif
-
-
-   rgui->trigger_state = input_state & ~rgui->old_input_state;
-
-   // FIXME: Allowing a held-down scroll is desired for left/right in filebrowser,
-   // but seems weird to allow in setting options.
-   // Logic here should take this into account.
-   rgui->do_held = (input_state & (
-         (1ULL << DEVICE_NAV_UP) |
-         (1ULL << DEVICE_NAV_DOWN) |
-         (1ULL << DEVICE_NAV_LEFT) | 
-         (1ULL << DEVICE_NAV_RIGHT))) &&
-      !(input_state & (1ULL << DEVICE_NAV_MENU));
-
-   return input_state;
 }

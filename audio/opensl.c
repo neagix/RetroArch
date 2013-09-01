@@ -33,13 +33,10 @@
 
 #define SLPlayItf_SetPlayState(a, ...) ((*(a))->SetPlayState(a, __VA_ARGS__))
 
-// TODO: Are these sane?
-#define BUFFER_SIZE 8192
-#define BUFFER_COUNT 4
-
 typedef struct sl
 {
-   uint8_t buffer[BUFFER_COUNT][BUFFER_SIZE];
+   uint8_t **buffer;
+   uint8_t *buffer_chunk;
    unsigned buffer_index;
    unsigned buffer_ptr;
    volatile unsigned buffered_blocks;
@@ -55,17 +52,14 @@ typedef struct sl
    slock_t *lock;
    scond_t *cond;
    bool nonblock;
+   unsigned buf_size;
    unsigned buf_count;
 } sl_t;
 
 static void opensl_callback(SLAndroidSimpleBufferQueueItf bq, void *ctx)
 {
    sl_t *sl = (sl_t*)ctx;
-
-   slock_lock(sl->lock);
-   sl->buffered_blocks--;
-   slock_unlock(sl->lock);
-
+   __sync_fetch_and_sub(&sl->buffered_blocks, 1);
    scond_signal(sl->cond);
 }
 
@@ -97,6 +91,8 @@ static void sl_free(void *data)
    if (sl->cond)
       scond_free(sl->cond);
 
+   free(sl->buffer);
+   free(sl->buffer_chunk);
    free(sl);
 }
 
@@ -119,21 +115,42 @@ static void *sl_init(const char *device, unsigned rate, unsigned latency)
    if (!sl)
       goto error;
 
+   RARCH_LOG("[SLES]: Requested audio latency: %d ms.", latency);
+
    GOTO_IF_FAIL(slCreateEngine(&sl->engine_object, 0, NULL, 0, NULL, NULL));
    GOTO_IF_FAIL(SLObjectItf_Realize(sl->engine_object, SL_BOOLEAN_FALSE));
    GOTO_IF_FAIL(SLObjectItf_GetInterface(sl->engine_object, SL_IID_ENGINE, &sl->engine));
+
    GOTO_IF_FAIL(SLEngineItf_CreateOutputMix(sl->engine, &sl->output_mix, 0, NULL, NULL));
    GOTO_IF_FAIL(SLObjectItf_Realize(sl->output_mix, SL_BOOLEAN_FALSE));
 
-   sl->buf_count = BUFFER_COUNT;
+   if (g_settings.audio.block_frames)
+      sl->buf_size = g_settings.audio.block_frames * 4;
+   else
+      sl->buf_size = next_pow2(32 * latency);
 
-   RARCH_LOG("[SLES] : Setting audio latency (buffer size: [%d])..\n", sl->buf_count * BUFFER_SIZE);
+   sl->buf_count = (latency * 4 * out_rate + 500) / 1000;
+   sl->buf_count = (sl->buf_count + sl->buf_size / 2) / sl->buf_size;
+
+   sl->buffer = (uint8_t**)calloc(sizeof(uint8_t*), sl->buf_count);
+   if (!sl->buffer)
+      goto error;
+
+   sl->buffer_chunk = (uint8_t*)calloc(sl->buf_count, sl->buf_size);
+   if (!sl->buffer_chunk)
+      goto error;
+
+   for (unsigned i = 0; i < sl->buf_count; i++)
+      sl->buffer[i] = sl->buffer_chunk + i * sl->buf_size;
+
+   RARCH_LOG("[SLES]: Setting audio latency: Block size = %u, Blocks = %u, Total = %u ...\n",
+         sl->buf_size, sl->buf_count, sl->buf_size * sl->buf_count);
 
    fmt_pcm.formatType    = SL_DATAFORMAT_PCM;
    fmt_pcm.numChannels   = 2;
    fmt_pcm.samplesPerSec = rate * 1000; // Samplerate is in milli-Hz.
-   fmt_pcm.bitsPerSample = sizeof(int16_t) * 8;
-   fmt_pcm.containerSize = sizeof(int16_t) * 8;
+   fmt_pcm.bitsPerSample = 16;
+   fmt_pcm.containerSize = 16;
    fmt_pcm.channelMask   = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
    fmt_pcm.endianness    = SL_BYTEORDER_LITTLEENDIAN; // Android only.
 
@@ -153,7 +170,7 @@ static void *sl_init(const char *device, unsigned rate, unsigned latency)
             1, &id, &req));
    GOTO_IF_FAIL(SLObjectItf_Realize(sl->buffer_queue_object, SL_BOOLEAN_FALSE));
 
-   GOTO_IF_FAIL(SLObjectItf_GetInterface(sl->buffer_queue_object, SL_IID_BUFFERQUEUE,
+   GOTO_IF_FAIL(SLObjectItf_GetInterface(sl->buffer_queue_object, SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
             &sl->buffer_queue));
 
    sl->cond = scond_new();
@@ -162,10 +179,10 @@ static void *sl_init(const char *device, unsigned rate, unsigned latency)
    (*sl->buffer_queue)->RegisterCallback(sl->buffer_queue, opensl_callback, sl);
 
    // Enqueue a bit to get stuff rolling.
-   sl->buffered_blocks = BUFFER_COUNT;
+   sl->buffered_blocks = sl->buf_count;
    sl->buffer_index = 0;
-   for (unsigned i = 0; i < BUFFER_COUNT; i++)
-      (*sl->buffer_queue)->Enqueue(sl->buffer_queue, sl->buffer[i], BUFFER_SIZE);
+   for (unsigned i = 0; i < sl->buf_count; i++)
+      (*sl->buffer_queue)->Enqueue(sl->buffer_queue, sl->buffer[i], sl->buf_size);
 
    GOTO_IF_FAIL(SLObjectItf_GetInterface(sl->buffer_queue_object, SL_IID_PLAY, &sl->player));
    GOTO_IF_FAIL(SLPlayItf_SetPlayState(sl->player, SL_PLAYSTATE_PLAYING));
@@ -206,23 +223,20 @@ static ssize_t sl_write(void *data, const void *buf_, size_t size)
 
    while (size)
    {
-      slock_lock(sl->lock);
       if (sl->nonblock)
       {
-         if (sl->buffered_blocks == BUFFER_COUNT)
-         {
-            slock_unlock(sl->lock);
+         if (sl->buffered_blocks == sl->buf_count)
             break;
-         }
       }
       else
       {
-         while (sl->buffered_blocks == BUFFER_COUNT)
+         slock_lock(sl->lock);
+         while (sl->buffered_blocks == sl->buf_count)
             scond_wait(sl->cond, sl->lock);
+         slock_unlock(sl->lock);
       }
-      slock_unlock(sl->lock);
 
-      size_t avail_write = min(BUFFER_SIZE - sl->buffer_ptr, size);
+      size_t avail_write = min(sl->buf_size - sl->buffer_ptr, size);
       if (avail_write)
       {
          memcpy(sl->buffer[sl->buffer_index] + sl->buffer_ptr, buf, avail_write);
@@ -232,18 +246,20 @@ static ssize_t sl_write(void *data, const void *buf_, size_t size)
          written        += avail_write;
       }
 
-      if (sl->buffer_ptr >= BUFFER_SIZE)
+      if (sl->buffer_ptr >= sl->buf_size)
       {
-         slock_lock(sl->lock);
-         (*sl->buffer_queue)->Enqueue(sl->buffer_queue, sl->buffer[sl->buffer_index], BUFFER_SIZE);
-         sl->buffer_index = (sl->buffer_index + 1) & (BUFFER_COUNT - 1);
-         sl->buffered_blocks++;
-         slock_unlock(sl->lock);
+         SLresult res = (*sl->buffer_queue)->Enqueue(sl->buffer_queue, sl->buffer[sl->buffer_index], sl->buf_size);
+         sl->buffer_index = (sl->buffer_index + 1) % sl->buf_count;
+         __sync_fetch_and_add(&sl->buffered_blocks, 1);
          sl->buffer_ptr = 0;
+
+         if (res != SL_RESULT_SUCCESS)
+         {
+            RARCH_ERR("[OpenSL]: Failed to write! (Error: 0x%x)\n", (unsigned)res);
+            return -1;
+         }
       }
    }
-
-   //RARCH_LOG("Blocks: %u\n", sl->buffered_blocks);
 
    return written;
 }
@@ -251,16 +267,20 @@ static ssize_t sl_write(void *data, const void *buf_, size_t size)
 static size_t sl_write_avail(void *data)
 {
    sl_t *sl = (sl_t*)data;
-   slock_lock(sl->lock);
-   size_t avail = (BUFFER_COUNT - (int)sl->buffered_blocks - 1) * BUFFER_SIZE + (BUFFER_SIZE - (int)sl->buffer_ptr);
-   slock_unlock(sl->lock);
+   size_t avail = (sl->buf_count - (int)sl->buffered_blocks - 1) * sl->buf_size + (sl->buf_size - (int)sl->buffer_ptr);
    return avail;
 }
 
 static size_t sl_buffer_size(void *data)
 {
+   sl_t *sl = (sl_t*)data;
+   return sl->buf_size * sl->buf_count;
+}
+
+static bool sl_use_float(void *data)
+{
    (void)data;
-   return BUFFER_SIZE * BUFFER_COUNT;
+   return false;
 }
 
 const audio_driver_t audio_opensl = {
@@ -270,7 +290,7 @@ const audio_driver_t audio_opensl = {
    sl_start,
    sl_set_nonblock_state,
    sl_free,
-   NULL,
+   sl_use_float,
    "opensl",
    sl_write_avail,
    sl_buffer_size,

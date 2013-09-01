@@ -30,7 +30,7 @@
 #endif
 
 #include "boolean.h"
-#include "libretro.h"
+#include "libretro_private.h"
 #include "dynamic_dummy.h"
 
 #ifdef NEED_DYNAMIC
@@ -42,6 +42,7 @@
 #endif
 
 #ifdef HAVE_DYNAMIC
+#undef SYM
 #define SYM(x) do { \
    function_t func = dylib_proc(lib_handle, #x); \
    memcpy(&p##x, &func, sizeof(func)); \
@@ -91,8 +92,6 @@ unsigned (*pretro_get_region)(void);
 
 void *(*pretro_get_memory_data)(unsigned);
 size_t (*pretro_get_memory_size)(unsigned);
-
-static bool environment_cb(unsigned cmd, void *data);
 
 #ifdef HAVE_DYNAMIC
 #if defined(__APPLE__)
@@ -396,7 +395,7 @@ void init_libretro_sym(bool dummy)
 
    load_symbols(dummy);
 
-   pretro_set_environment(environment_cb);
+   pretro_set_environment(rarch_environment_cb);
 }
 
 void uninit_libretro_sym(void)
@@ -470,7 +469,7 @@ void dylib_close(dylib_t lib)
 }
 #endif
 
-static bool environment_cb(unsigned cmd, void *data)
+bool rarch_environment_cb(unsigned cmd, void *data)
 {
    switch (cmd)
    {
@@ -532,7 +531,10 @@ static bool environment_cb(unsigned cmd, void *data)
          const struct retro_message *msg = (const struct retro_message*)data;
          RARCH_LOG("Environ SET_MESSAGE: %s\n", msg->msg);
          if (g_extern.msg_queue)
+         {
+            msg_queue_clear(g_extern.msg_queue);
             msg_queue_push(g_extern.msg_queue, msg->msg, 1, msg->frames);
+         }
          break;
       }
 
@@ -650,6 +652,7 @@ static bool environment_cb(unsigned cmd, void *data)
          break;
 
       case RETRO_ENVIRONMENT_SET_HW_RENDER:
+      case RETRO_ENVIRONMENT_SET_HW_RENDER | RETRO_ENVIRONMENT_EXPERIMENTAL: // ABI compat
       {
          RARCH_LOG("Environ SET_HW_RENDER.\n");
          struct retro_hw_render_callback *cb = (struct retro_hw_render_callback*)data;
@@ -666,6 +669,7 @@ static bool environment_cb(unsigned cmd, void *data)
                break;
 
             case RETRO_HW_CONTEXT_OPENGL:
+            case RETRO_HW_CONTEXT_OPENGL_CORE:
                RARCH_ERR("Requesting OpenGL context, but RetroArch is compiled against OpenGLES2. Cannot use HW context.\n");
                return false;
 #elif defined(HAVE_OPENGL)
@@ -677,6 +681,11 @@ static bool environment_cb(unsigned cmd, void *data)
                RARCH_LOG("Requesting OpenGL context.\n");
                driver.video = &video_gl;
                break;
+
+            case RETRO_HW_CONTEXT_OPENGL_CORE:
+               RARCH_LOG("Requesting core OpenGL context (%u.%u).\n", cb->version_major, cb->version_minor);
+               driver.video = &video_gl;
+               break;
 #endif
 
             default:
@@ -685,7 +694,11 @@ static bool environment_cb(unsigned cmd, void *data)
          }
          cb->get_current_framebuffer = driver_get_current_framebuffer;
          cb->get_proc_address = driver_get_proc_address;
-         memcpy(&g_extern.system.hw_render_callback, cb, sizeof(*cb));
+
+         if (cmd & RETRO_ENVIRONMENT_EXPERIMENTAL) // Old ABI. Don't copy garbage.
+            memcpy(&g_extern.system.hw_render_callback, cb, offsetof(struct retro_hw_render_callback, stencil));
+         else
+            memcpy(&g_extern.system.hw_render_callback, cb, sizeof(*cb));
          break;
       }
 
@@ -696,6 +709,87 @@ static bool environment_cb(unsigned cmd, void *data)
          g_extern.system.no_game = state;
          break;
       }
+
+      case RETRO_ENVIRONMENT_GET_LIBRETRO_PATH:
+      {
+         const char **path = (const char**)data;
+#ifdef HAVE_DYNAMIC
+         *path = g_settings.libretro;
+#else
+         *path = NULL; 
+#endif
+         break;
+      }
+
+#ifdef HAVE_THREADS
+      case RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK:
+      {
+         RARCH_LOG("Environ SET_AUDIO_CALLBACK.\n");
+         const struct retro_audio_callback *info = (const struct retro_audio_callback*)data;
+
+#ifdef HAVE_FFMPEG
+         if (g_extern.recording) // A/V sync is a must.
+            return false;
+#endif
+
+#ifdef HAVE_NETPLAY
+         if (g_extern.netplay_enable)
+            return false;
+#endif
+
+         g_extern.system.audio_callback = info->callback;
+         break;
+      }
+#endif
+
+      case RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK:
+      {
+         RARCH_LOG("Environ SET_FRAME_TIME_CALLBACK.\n");
+
+#ifdef HAVE_NETPLAY
+         if (g_extern.netplay_enable) // retro_run() will be called in very strange and mysterious ways, have to disable it.
+            return false;
+#endif
+
+         const struct retro_frame_time_callback *info = (const struct retro_frame_time_callback*)data;
+         g_extern.system.frame_time = *info;
+         break;
+      }
+
+      case RETRO_ENVIRONMENT_SET_LIBRETRO_PATH:
+         RARCH_LOG("Environ (Private) SET_LIBRETRO_PATH.\n");
+
+         if (path_file_exists((const char*)data))
+            strlcpy(g_settings.libretro, (const char*)data, sizeof(g_settings.libretro));
+         else
+            return false;
+         break;
+
+      case RETRO_ENVIRONMENT_EXEC:
+      case RETRO_ENVIRONMENT_EXEC_ESCAPE:
+
+         if (data)
+            strlcpy(g_extern.fullpath, (const char*)data, sizeof(g_extern.fullpath));
+         else
+            *g_extern.fullpath = '\0';
+
+#if !defined( HAVE_DYNAMIC) && defined(RARCH_CONSOLE)
+         g_extern.lifecycle_mode_state &= ~(1ULL << MODE_GAME);
+         g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN);
+         g_extern.lifecycle_mode_state |= (1ULL << MODE_EXITSPAWN_START_GAME);
+#elif defined(HAVE_DYNAMIC)
+         g_extern.lifecycle_mode_state |= (1ULL << MODE_LOAD_GAME);
+#endif
+
+         if (cmd == RETRO_ENVIRONMENT_EXEC_ESCAPE)
+         {
+            RARCH_LOG("Environ (Private) EXEC_ESCAPE.\n");
+            g_extern.exec = true;
+         }
+         else
+            RARCH_LOG("Environ (Private) EXEC.\n");
+
+         break;
 
       default:
          RARCH_LOG("Environ UNSUPPORTED (#%u).\n", cmd);

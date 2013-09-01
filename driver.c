@@ -24,6 +24,7 @@
 #include "audio/utils.h"
 #include "audio/resampler.h"
 #include "gfx/thread_wrapper.h"
+#include "audio/thread_wrapper.h"
 #include "gfx/gfx_common.h"
 
 #ifdef HAVE_X11
@@ -37,7 +38,9 @@
 static const audio_driver_t *audio_drivers[] = {
 #ifdef HAVE_ALSA
    &audio_alsa,
+#ifndef __QNX__
    &audio_alsathread,
+#endif
 #endif
 #if defined(HAVE_OSS) || defined(HAVE_OSS_BSD)
    &audio_oss,
@@ -120,6 +123,9 @@ static const video_driver_t *video_drivers[] = {
 #ifdef HAVE_NULLVIDEO
    &video_null,
 #endif
+#ifdef HAVE_OMAP
+   &video_omap,
+#endif
 };
 
 static const input_driver_t *input_drivers[] = {
@@ -153,8 +159,8 @@ static const input_driver_t *input_drivers[] = {
 #if defined(__linux__) && !defined(ANDROID)
    &input_linuxraw,
 #endif
-#ifdef IOS
-   &input_ios,
+#if defined(IOS) || defined(OSX) //< Don't use __APPLE__ as it breaks basic SDL builds
+   &input_apple,
 #endif
 #ifdef __BLACKBERRY_QNX__
    &input_qnx,
@@ -266,7 +272,11 @@ static void adjust_system_rates(void)
 
 void driver_set_monitor_refresh_rate(float hz)
 {
-   RARCH_LOG("Setting refresh rate to: %.2fHz.\n", hz);
+   char msg[256];
+   snprintf(msg, sizeof(msg), "Setting refresh rate to: %.3f Hz.", hz);
+   msg_queue_push(g_extern.msg_queue, msg, 1, 180);
+   RARCH_LOG("%s\n", msg);
+
    g_settings.video.refresh_rate = hz;
    adjust_system_rates();
 
@@ -348,7 +358,7 @@ void global_uninit_drivers(void)
 
    if (driver.input_data)
    {
-      driver.input->free(NULL);
+      driver.input->free(driver.input_data);
       driver.input_data = NULL;
    }
 }
@@ -364,19 +374,26 @@ void init_drivers(void)
    g_extern.frame_count = 0;
    init_video_input();
 
-   if (g_extern.system.hw_render_callback.context_reset)
+   if (!driver.video_cache_context_ack && g_extern.system.hw_render_callback.context_reset)
       g_extern.system.hw_render_callback.context_reset();
+   driver.video_cache_context_ack = false;
 
    init_audio();
 
    // Keep non-throttled state as good as possible.
    if (driver.nonblock_state)
       driver_set_nonblock_state(driver.nonblock_state);
+
+   g_extern.system.frame_time_last = 0;
 }
 
 void uninit_drivers(void)
 {
    uninit_audio();
+
+   if (g_extern.system.hw_render_callback.context_destroy && !driver.video_cache_context)
+      g_extern.system.hw_render_callback.context_destroy();
+
    uninit_video_input();
 
    if (driver.video_data_own)
@@ -487,8 +504,26 @@ void init_audio(void)
       return;
    }
 
-   driver.audio_data = audio_init_func(*g_settings.audio.device ? g_settings.audio.device : NULL,
-         g_settings.audio.out_rate, g_settings.audio.latency);
+#ifdef HAVE_THREADS
+   find_audio_driver();
+   if (g_extern.system.audio_callback)
+   {
+      RARCH_LOG("Starting threaded audio driver ...\n");
+      if (!rarch_threaded_audio_init(&driver.audio, &driver.audio_data,
+               *g_settings.audio.device ? g_settings.audio.device : NULL,
+               g_settings.audio.out_rate, g_settings.audio.latency,
+               driver.audio))
+      {
+         RARCH_ERR("Cannot open threaded audio driver ... Exiting ...\n");
+         rarch_fail(1, "init_audio()");
+      }
+   }
+   else
+#endif
+   {
+      driver.audio_data = audio_init_func(*g_settings.audio.device ? g_settings.audio.device : NULL,
+            g_settings.audio.out_rate, g_settings.audio.latency);
+   }
 
    if (!driver.audio_data)
    {
@@ -524,7 +559,8 @@ void init_audio(void)
    rarch_assert(g_settings.audio.out_rate < g_settings.audio.in_rate * AUDIO_MAX_RATIO);
    rarch_assert(g_extern.audio_data.outsamples = (float*)malloc(outsamples_max * sizeof(float)));
 
-   if (g_extern.audio_active && g_settings.audio.rate_control)
+   g_extern.audio_data.rate_control = false;
+   if (!g_extern.system.audio_callback && g_extern.audio_active && g_settings.audio.rate_control)
    {
       if (driver.audio->buffer_size && driver.audio->write_avail)
       {
@@ -543,6 +579,9 @@ void init_audio(void)
 #endif
 
    g_extern.measure_data.buffer_free_samples_count = 0;
+
+   if (g_extern.audio_active && !g_extern.audio_data.mute && g_extern.system.audio_callback) // Threaded driver is initially stopped.
+      audio_start_func();
 }
 
 static void compute_audio_buffer_statistics(void)
@@ -589,22 +628,14 @@ static void compute_audio_buffer_statistics(void)
          (100.0 * high_water_count) / (samples - 1));
 }
 
-static void compute_monitor_fps_statistics(void)
+bool driver_monitor_fps_statistics(double *refresh_rate, double *deviation, unsigned *sample_points)
 {
    if (g_settings.video.threaded)
-   {
-      RARCH_LOG("Monitor FPS estimation is disabled for threaded video.\n");
-      return;
-   }
+      return false;
 
-   if (g_extern.measure_data.frame_time_samples_count < 2 * MEASURE_FRAME_TIME_SAMPLES_COUNT)
-   {
-      RARCH_LOG("Does not have enough samples for monitor refresh rate estimation. Requires to run for at least %u frames.\n",
-            2 * MEASURE_FRAME_TIME_SAMPLES_COUNT);
-      return;
-   }
-
-   unsigned samples = MEASURE_FRAME_TIME_SAMPLES_COUNT;
+   unsigned samples = min(MEASURE_FRAME_TIME_SAMPLES_COUNT, g_extern.measure_data.frame_time_samples_count);
+   if (samples < 2)
+      return false;
 
    // Measure statistics on frame time (microsecs), *not* FPS.
    rarch_time_t accum = 0;
@@ -627,15 +658,43 @@ static void compute_monitor_fps_statistics(void)
       accum_var += diff * diff;
    }
 
-   double stddev = sqrt((double)accum_var / (samples - 1));
-   double avg_fps = 1000000.0 / avg;
+   *deviation = sqrt((double)accum_var / (samples - 1)) / avg;
+   *refresh_rate = 1000000.0 / avg;
+   *sample_points = samples;
 
-   RARCH_LOG("Average monitor Hz: %.6f Hz. (%.3f %% frame time deviation, based on %u last samples).\n",
-         avg_fps, 100.0 * stddev / avg, samples);
+   return true;
+}
+
+static void compute_monitor_fps_statistics(void)
+{
+   if (g_settings.video.threaded)
+   {
+      RARCH_LOG("Monitor FPS estimation is disabled for threaded video.\n");
+      return;
+   }
+
+   if (g_extern.measure_data.frame_time_samples_count < 2 * MEASURE_FRAME_TIME_SAMPLES_COUNT)
+   {
+      RARCH_LOG("Does not have enough samples for monitor refresh rate estimation. Requires to run for at least %u frames.\n",
+            2 * MEASURE_FRAME_TIME_SAMPLES_COUNT);
+      return;
+   }
+
+   double avg_fps = 0.0;
+   double stddev = 0.0;
+   unsigned samples = 0;
+   if (driver_monitor_fps_statistics(&avg_fps, &stddev, &samples))
+   {
+      RARCH_LOG("Average monitor Hz: %.6f Hz. (%.3f %% frame time deviation, based on %u last samples).\n",
+            avg_fps, 100.0 * stddev, samples);
+   }
 }
 
 void uninit_audio(void)
 {
+   if (driver.audio_data && driver.audio)
+      driver.audio->free(driver.audio_data);
+
    free(g_extern.audio_data.conv_outsamples);
    g_extern.audio_data.conv_outsamples = NULL;
    g_extern.audio_data.data_ptr        = 0;
@@ -648,9 +707,6 @@ void uninit_audio(void)
       g_extern.audio_active = false;
       return;
    }
-
-   if (driver.audio_data && driver.audio)
-      driver.audio->free(driver.audio_data);
 
    rarch_resampler_freep(&g_extern.audio_data.resampler, &g_extern.audio_data.resampler_data);
 
@@ -877,7 +933,8 @@ void init_video_input(void)
    {
       if (g_settings.video.force_aspect)
       {
-         width = roundf(geom->base_height * g_settings.video.xscale * g_extern.system.aspect_ratio);
+         unsigned base_width = roundf(geom->base_height * g_extern.system.aspect_ratio); // Do rounding here to simplify integer scale correctness.
+         width = roundf(base_width * g_settings.video.xscale);
          height = roundf(geom->base_height * g_settings.video.yscale);
       }
       else

@@ -3,6 +3,7 @@ include config.mk
 TARGET = retroarch tools/retroarch-joyconfig tools/retrolaunch/retrolaunch
 
 OBJ = frontend/frontend.o \
+		frontend/frontend_context.o \
 		retroarch.o \
 		file.o \
 		file_path.o \
@@ -60,6 +61,11 @@ endif
 
 DEFINES = -DHAVE_CONFIG_H -DHAVE_SCREENSHOTS
 
+ifeq ($(GLOBAL_CONFIG_DIR),)
+   GLOBAL_CONFIG_DIR = /etc
+endif
+DEFINES += -DGLOBAL_CONFIG_DIR='"$(GLOBAL_CONFIG_DIR)"'
+
 ifeq ($(REENTRANT_TEST), 1)
    DEFINES += -Dmain=retroarch_main
    OBJ += console/test.o
@@ -87,7 +93,7 @@ ifeq ($(HAVE_RGUI), 1)
 endif
 
 ifeq ($(HAVE_THREADS), 1)
-   OBJ += autosave.o thread.o gfx/thread_wrapper.o
+   OBJ += autosave.o thread.o gfx/thread_wrapper.o audio/thread_wrapper.o
    ifeq ($(findstring Haiku,$(OS)),)
       LIBS += -lpthread
    endif
@@ -135,6 +141,10 @@ ifeq ($(HAVE_ROAR), 1)
    DEFINES += $(ROAR_CFLAGS)
 endif
 
+ifeq ($(HAVE_HARD_FLOAT), 1)
+   DEFINES += -mfloat-abi=hard
+endif
+
 ifeq ($(HAVE_AL), 1)
    OBJ += audio/openal.o
    ifeq ($(OSX),1)
@@ -174,10 +184,10 @@ ifeq ($(HAVE_SDL), 1)
    JOYCONFIG_OBJ += input/sdl_joypad.o
    DEFINES += $(SDL_CFLAGS) $(BSD_LOCAL_INC)
    LIBS += $(SDL_LIBS)
+endif
 
-   ifeq ($(HAVE_OPENGL), 1)
-      OBJ += gfx/context/sdl_ctx.o
-   endif
+ifeq ($(HAVE_OMAP), 1)
+	OBJ += gfx/omap_gfx.o gfx/fbdev.o
 endif
 
 ifeq ($(HAVE_OPENGL), 1)
@@ -186,7 +196,8 @@ ifeq ($(HAVE_OPENGL), 1)
 			 gfx/fonts/gl_font.o \
 			 gfx/fonts/gl_raster_font.o \
 			 gfx/math/matrix.o \
-			 gfx/state_tracker.o
+			 gfx/state_tracker.o \
+			 gfx/glsym/rglgen.o
 
    ifeq ($(HAVE_KMS), 1)
       OBJ += gfx/context/drm_egl_ctx.o
@@ -213,12 +224,14 @@ ifeq ($(HAVE_OPENGL), 1)
    ifeq ($(HAVE_GLES), 1)
       LIBS += -lGLESv2
       DEFINES += -DHAVE_OPENGLES -DHAVE_OPENGLES2
+      OBJ += gfx/glsym/glsym_es2.o
    else
+      DEFINES += -DHAVE_GL_SYNC
+      OBJ += gfx/glsym/glsym_gl.o
       ifeq ($(OSX), 1)
          LIBS += -framework OpenGL
       else
          LIBS += -lGL
-         DEFINES += -DHAVE_GL_SYNC
       endif
    endif
 
@@ -307,7 +320,7 @@ ifeq ($(HAVE_NEON),1)
 	OBJ += audio/sinc_neon.o
 	# When compiled without this, tries to attempt to compile sinc lerp,
 	# which will error out
-	DEFINES += -DSINC_LOWER_QUALITY
+	DEFINES += -DSINC_LOWER_QUALITY -DHAVE_NEON
 endif
 
 OBJ += audio/utils.o
@@ -322,6 +335,11 @@ endif
 OPTIMIZE_FLAG = -O3 -ffast-math
 ifeq ($(DEBUG), 1)
    OPTIMIZE_FLAG = -O0
+endif
+
+ifeq ($(GL_DEBUG), 1)
+   CFLAGS += -DGL_DEBUG
+   CXXFLAGS += -DGL_DEBUG
 endif
 
 CFLAGS += -Wall $(OPTIMIZE_FLAG) $(INCLUDE_DIRS) -g -I.
@@ -389,22 +407,20 @@ tools/input_common_joyconfig.o: input/input_common.c
 
 install: $(TARGET)
 	mkdir -p $(DESTDIR)$(PREFIX)/bin 2>/dev/null || /bin/true
-	mkdir -p $(DESTDIR)/etc 2>/dev/null || /bin/true
+	mkdir -p $(DESTDIR)$(GLOBAL_CONFIG_DIR) 2>/dev/null || /bin/true
 	mkdir -p $(DESTDIR)$(PREFIX)/share/man/man1 2>/dev/null || /bin/true
 	mkdir -p $(DESTDIR)$(PREFIX)/share/pixmaps 2>/dev/null || /bin/true
 	install -m755 $(TARGET) $(DESTDIR)$(PREFIX)/bin 
-	install -m644 retroarch.cfg $(DESTDIR)/etc/retroarch.cfg
+	install -m644 retroarch.cfg $(DESTDIR)$(GLOBAL_CONFIG_DIR)/retroarch.cfg
 	install -m644 docs/retroarch.1 $(DESTDIR)$(MAN_DIR)
 	install -m644 docs/retroarch-joyconfig.1 $(DESTDIR)$(MAN_DIR)
-	install -m755 retroarch-zip $(DESTDIR)$(PREFIX)/bin
 	install -m644 media/retroarch.png $(DESTDIR)$(PREFIX)/share/pixmaps
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/retroarch
 	rm -f $(DESTDIR)$(PREFIX)/bin/retroarch-joyconfig
 	rm -f $(DESTDIR)$(PREFIX)/bin/retrolaunch
-	rm -f $(DESTDIR)$(PREFIX)/bin/retroarch-zip
-	rm -f $(DESTDIR)/etc/retroarch.cfg
+	rm -f $(DESTDIR)$(GLOBAL_CONFIG_DIR)/retroarch.cfg
 	rm -f $(DESTDIR)$(PREFIX)/share/man/man1/retroarch.1
 	rm -f $(DESTDIR)$(PREFIX)/share/man/man1/retroarch-joyconfig.1
 	rm -f $(DESTDIR)$(PREFIX)/share/pixmaps/retroarch.png
@@ -416,6 +432,7 @@ clean:
 	rm -f audio/*.o
 	rm -f conf/*.o
 	rm -f gfx/*.o
+	rm -f gfx/glsym/*.o
 	rm -f gfx/rpng/*.o
 	rm -f gfx/fonts/*.o
 	rm -f gfx/math/*.o

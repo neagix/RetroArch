@@ -5,7 +5,6 @@ print_help()
  Quickbuild script
 ====================
 Package: $PACKAGE_NAME
-Version: $PACKAGE_VERSION
 
 General environment variables:
 CC:         C compiler
@@ -16,6 +15,7 @@ LDFLAGS:    Linker flags
 
 General options:
 --prefix=\$path: Install path prefix
+--global-config-dir=\$path: System wide config file prefix
 --host=HOST: cross-compile to build programs to run on HOST
 --help: Show this help
 
@@ -51,6 +51,7 @@ parse_input() # Parse stuff :V
 	while [ "$1" ]; do
 		case "$1" in
 			--prefix=*) PREFIX=${1##--prefix=};;
+			--global-config-dir=*) GLOBAL_CONFIG_DIR=${1##--global-config-dir=};;
 			--host=*) CROSS_COMPILE=${1##--host=}-;;
 			--enable-*)
 				opt_exists "${1##--enable-}"
