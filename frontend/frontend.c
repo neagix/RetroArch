@@ -35,6 +35,8 @@ frontend_ctx_driver_t *frontend_ctx;
 
 default_paths_t default_paths;
 
+uint64_t rgui_input(void);
+
 // Rename core filename executable to a more sane name.
 static bool libretro_install_core(const char *path_prefix,
       const char *core_exe_path)
@@ -200,6 +202,12 @@ int main_entry(int argc, char *argv[])
 #endif
          if (driver.video_poke->set_aspect_ratio)
             driver.video_poke->set_aspect_ratio(driver.video_data, g_settings.video.aspect_ratio_idx);
+
+         // wait until all user input is released
+         while (rgui_input())
+         {
+             rarch_input_poll();
+         }
 
          while ((g_extern.is_paused && !g_extern.is_oneshot) ? rarch_main_idle_iterate() : rarch_main_iterate())
          {

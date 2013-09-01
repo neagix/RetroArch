@@ -690,7 +690,7 @@ static const struct retro_keybind *menu_nav_binds[] = {
 };
 #endif
 
-static uint64_t rgui_input(void)
+uint64_t rgui_input(void)
 {
    uint64_t input_state = 0;
 
